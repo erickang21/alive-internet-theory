@@ -1,8 +1,8 @@
 import pytest
+from sqlalchemy.exc import SQLAlchemyError
 
 from backend.api import routes
 from backend.api.app import create_app
-from backend.database import DatabaseUnavailableError
 
 
 class FakeEvaluationRepository:
@@ -31,7 +31,7 @@ class FakeCommunityVoteRepository:
 
 class UnavailableRepository:
     def __init__(self):
-        raise DatabaseUnavailableError("no db configured")
+        raise SQLAlchemyError("database unavailable")
 
 
 def fake_evaluate_video(video_id, transcript, track_kind, channel_id, video_length_seconds):
@@ -43,6 +43,11 @@ def fake_evaluate_video(video_id, transcript, track_kind, channel_id, video_leng
         "verdict": "likely_human",
         "breakdown": [],
     }
+
+
+@pytest.fixture(autouse=True)
+def no_migrations(monkeypatch):
+    monkeypatch.setattr("backend.api.app.run_migrations", lambda: None)
 
 
 @pytest.fixture

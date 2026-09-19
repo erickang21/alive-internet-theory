@@ -5,10 +5,10 @@ from statistics import median
 from typing import Any
 
 import requests
-from pymongo.errors import PyMongoError
+from sqlalchemy.exc import SQLAlchemyError
 
 from backend.config import config
-from backend.database import ChannelCacheRepository, DatabaseUnavailableError
+from backend.database import ChannelCacheRepository
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ def fetch_channel(channel_id: str) -> dict[str, Any]:
         cached = repo.find_by_channel_id(channel_id)
         if cached:
             return cached
-    except (DatabaseUnavailableError, PyMongoError):
+    except (SQLAlchemyError, OSError):
         logger.warning("channel cache unavailable; fetching %s uncached", channel_id)
         repo = None
 
@@ -87,7 +87,7 @@ def fetch_channel(channel_id: str) -> dict[str, Any]:
     if repo is not None:
         try:
             repo.upsert(channel)
-        except (DatabaseUnavailableError, PyMongoError):
+        except (SQLAlchemyError, OSError):
             logger.warning("channel cache unavailable; %s not cached", channel_id)
     return channel
 

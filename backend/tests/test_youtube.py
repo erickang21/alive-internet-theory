@@ -1,5 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from backend.scoring import youtube
 
 
@@ -87,7 +89,7 @@ def test_account_age_ignores_old_channels():
 
 def test_fetch_channel_works_without_database(monkeypatch):
     def unavailable_repo():
-        raise youtube.DatabaseUnavailableError("no db")
+        raise SQLAlchemyError("database unavailable")
 
     monkeypatch.setattr(youtube, "ChannelCacheRepository", unavailable_repo)
     monkeypatch.setattr(

@@ -1,7 +1,8 @@
 import logging
 from typing import Any
 
-from backend.database import DatabaseUnavailableError
+from sqlalchemy.exc import SQLAlchemyError
+
 from backend.scoring import channel_history, fillers, gptzero, youtube
 
 logger = logging.getLogger(__name__)
@@ -24,9 +25,9 @@ def _safe(criterion_name: str, fn, *args) -> dict[str, Any]:
     # that criterion, not fail the whole evaluation.
     try:
         return fn(*args)
-    except DatabaseUnavailableError:
+    except SQLAlchemyError:
         logger.warning("criterion %s skipped: database unavailable", criterion_name)
-        return _unavailable(criterion_name, "Criterion unavailable (database unreachable).")
+        return _unavailable(criterion_name, "Criterion unavailable (database error).")
     except Exception:
         logger.exception("criterion %s failed", criterion_name)
         return _unavailable(criterion_name, "Criterion unavailable (upstream error).")

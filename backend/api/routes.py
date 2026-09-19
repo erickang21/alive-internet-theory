@@ -1,9 +1,9 @@
 import logging
 
 from flask import Blueprint, jsonify, request
-from pymongo.errors import PyMongoError
+from sqlalchemy.exc import SQLAlchemyError
 
-from backend.database import CommunityVoteRepository, DatabaseUnavailableError, EvaluationRepository
+from backend.database import CommunityVoteRepository, EvaluationRepository
 from backend.scoring import evaluate_video
 
 api = Blueprint("api", __name__)
@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 VALID_VOTES = {"human", "ai"}
 
-DB_ERRORS = (DatabaseUnavailableError, PyMongoError)
+DB_ERRORS = (SQLAlchemyError, OSError)
 
 
 @api.get("/health")

@@ -1,15 +1,13 @@
 from backend.database.client import (
     ChannelCacheRepository,
     CommunityVoteRepository,
-    DatabaseUnavailableError,
     EvaluationRepository,
-    get_database,
+    run_migrations,
 )
 
 __all__ = [
     "ChannelCacheRepository",
     "CommunityVoteRepository",
-    "DatabaseUnavailableError",
     "EvaluationRepository",
-    "get_database",
+    "run_migrations",
 ]
