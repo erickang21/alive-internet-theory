@@ -35,6 +35,14 @@ function renderNotice(badgeText, message) {
   overlay.querySelector(".ait-detail-line").textContent = message;
 }
 
+// A negative deduction is a bonus (a natural filler rate, a channel with a human
+// track record), so show the sign the criterion actually had on the score.
+function formatDeduction(deduction) {
+  if (deduction > 0) return `−${deduction}`;
+  if (deduction < 0) return `+${-deduction}`;
+  return "0";
+}
+
 export function renderEvaluation(evaluation) {
   const overlay = ensureOverlay();
   const verdict = VERDICTS[evaluation.verdict] ?? VERDICTS.likely_ai;
@@ -63,7 +71,7 @@ export function renderEvaluation(evaluation) {
 
     const deduction = document.createElement("span");
     deduction.className = "ait-deduction";
-    deduction.textContent = item.applied ? `−${item.deduction}` : "n/a";
+    deduction.textContent = item.applied ? formatDeduction(item.deduction) : "n/a";
 
     const detail = document.createElement("span");
     detail.textContent = item.detail;
