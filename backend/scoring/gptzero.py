@@ -7,7 +7,7 @@ from backend.retry import retry
 
 BASE_URL = "https://api.gptzero.me"
 MIN_WORDS_FOR_SIGNAL = 75
-MAX_DEDUCTION = 45
+MAX_DEDUCTION = 50
 
 # GPTZero's Cloudflare rejects default python-requests User-Agents with error 1010,
 # so we present a browser-style one.
