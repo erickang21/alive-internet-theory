@@ -12,6 +12,8 @@ class Config:
     gptzero_api_key: str = field(default_factory=lambda: os.environ.get("GPTZERO_API_KEY", ""))
     youtube_api_key: str = field(default_factory=lambda: os.environ.get("YOUTUBE_API_KEY", ""))
     mongodb_uri: str = field(default_factory=lambda: os.environ.get("MONGODB_URI", ""))
+    mongodb_username: str = field(default_factory=lambda: os.environ.get("MONGODB_USERNAME", ""))
+    mongodb_password: str = field(default_factory=lambda: os.environ.get("MONGODB_PASSWORD", ""))
     mongodb_db_name: str = field(
         default_factory=lambda: os.environ.get("MONGODB_DB_NAME", "alive_internet_theory")
     )

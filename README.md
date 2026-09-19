@@ -8,7 +8,7 @@ Chrome extension that overlays on YouTube videos and Shorts and rates them **Lik
 frontend/            Chrome extension (Manifest V3, esbuild)
 backend/api/         Flask API: GET /video/evaluation, POST /video/evaluation, POST /video/community-vote
 backend/scoring/     Scoring engine (starts at 100, deducts per AI evidence)
-backend/database/    MongoDB Atlas repositories (evaluations, channel cache, community votes)
+backend/database/    MongoDB Atlas repositories (videos, channel cache, community votes)
 ```
 
 ## Runbook
@@ -32,7 +32,7 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Edit `backend/.env` and fill in `GPTZERO_API_KEY`, `YOUTUBE_API_KEY`, and `MONGODB_URI` with the values gathered above. Never commit `.env` — it is gitignored.
+Edit `backend/.env` and fill in `GPTZERO_API_KEY`, `YOUTUBE_API_KEY`, `MONGODB_URI`, `MONGODB_USERNAME`, and `MONGODB_PASSWORD` with the values gathered above. Never commit `.env` — it is gitignored.
 
 **Frontend:**
 

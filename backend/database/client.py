@@ -12,7 +12,12 @@ CHANNEL_CACHE_TTL_SECONDS = 24 * 60 * 60
 
 @lru_cache(maxsize=1)
 def get_client() -> MongoClient:
-    return MongoClient(config.mongodb_uri)
+    # Credentials go in as kwargs rather than spliced into the URI so special
+    # characters in the password never need URL-encoding.
+    auth: dict[str, str] = {}
+    if config.mongodb_username:
+        auth = {"username": config.mongodb_username, "password": config.mongodb_password}
+    return MongoClient(config.mongodb_uri, **auth)
 
 
 def get_database() -> Database:
@@ -28,8 +33,8 @@ def _ensure_indexes(db: Database) -> None:
     global _indexes_ensured
     if _indexes_ensured:
         return
-    db.evaluations.create_index([("video_id", ASCENDING)], unique=True)
-    db.evaluations.create_index([("channel_id", ASCENDING)])
+    db.videos.create_index([("video_id", ASCENDING)], unique=True)
+    db.videos.create_index([("channel_id", ASCENDING)])
     db.channels.create_index([("channel_id", ASCENDING)], unique=True)
     # TTL index lets Atlas expire cached channel data instead of us checking staleness.
     db.channels.create_index(
@@ -45,7 +50,7 @@ def _utcnow() -> datetime:
 
 class EvaluationRepository:
     def __init__(self, db: Database | None = None) -> None:
-        self._collection = (db or get_database()).evaluations
+        self._collection = (db or get_database()).videos
 
     def find_by_video_id(self, video_id: str) -> dict[str, Any] | None:
         return self._collection.find_one({"video_id": video_id}, {"_id": 0})
