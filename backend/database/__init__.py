@@ -1,6 +1,7 @@
 from backend.database.client import (
     ChannelCacheRepository,
     CommunityVoteRepository,
+    DatabaseUnavailableError,
     EvaluationRepository,
     get_database,
 )
@@ -8,6 +9,7 @@ from backend.database.client import (
 __all__ = [
     "ChannelCacheRepository",
     "CommunityVoteRepository",
+    "DatabaseUnavailableError",
     "EvaluationRepository",
     "get_database",
 ]

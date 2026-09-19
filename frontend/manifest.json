@@ -11,15 +11,15 @@
   "content_scripts": [
     {
       "matches": ["https://www.youtube.com/*"],
+      "js": ["dist/main-world.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://www.youtube.com/*"],
       "js": ["dist/content.js"],
       "css": ["dist/overlay.css"],
       "run_at": "document_idle"
-    }
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": ["dist/main-world.js"],
-      "matches": ["https://www.youtube.com/*"]
     }
   ]
 }

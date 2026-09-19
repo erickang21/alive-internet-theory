@@ -8,16 +8,25 @@ from pymongo.database import Database
 from backend.config import config
 
 CHANNEL_CACHE_TTL_SECONDS = 24 * 60 * 60
+SERVER_SELECTION_TIMEOUT_MS = 3000
+
+
+class DatabaseUnavailableError(RuntimeError):
+    pass
 
 
 @lru_cache(maxsize=1)
 def get_client() -> MongoClient:
+    if not config.mongodb_uri:
+        raise DatabaseUnavailableError("MONGODB_URI is not configured")
     # Credentials go in as kwargs rather than spliced into the URI so special
     # characters in the password never need URL-encoding.
     auth: dict[str, str] = {}
     if config.mongodb_username:
         auth = {"username": config.mongodb_username, "password": config.mongodb_password}
-    return MongoClient(config.mongodb_uri, **auth)
+    return MongoClient(
+        config.mongodb_uri, serverSelectionTimeoutMS=SERVER_SELECTION_TIMEOUT_MS, **auth
+    )
 
 
 def get_database() -> Database:

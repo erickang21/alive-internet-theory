@@ -1,12 +1,12 @@
-import { fetchPlayerResponseViaInjection } from "./playerResponse.js";
+import { fetchAndroidPlayerResponse } from "./playerResponse.js";
 
-export async function getTranscript(videoId, pagePlayerResponse) {
-  const fromPage = await fetchFromTracks(extractCaptionTracks(pagePlayerResponse));
-  if (fromPage) return fromPage;
+export async function getTranscript(videoId, playerResponse, { allowAndroidFallback = true } = {}) {
+  const fromGiven = await fetchFromTracks(extractCaptionTracks(playerResponse));
+  if (fromGiven || !allowAndroidFallback) return fromGiven;
 
   // Page-level tracks can be PoToken-gated (empty 200s) or expired; the
   // ANDROID-client player response is signed differently and needs no PoToken.
-  const androidPlayerResponse = await fetchPlayerResponseViaInjection(videoId);
+  const androidPlayerResponse = await fetchAndroidPlayerResponse(videoId);
   return fetchFromTracks(extractCaptionTracks(androidPlayerResponse));
 }
 

@@ -1,7 +1,7 @@
 import logging
 from typing import Any
 
-from backend.scoring import fillers, gptzero, youtube
+from backend.scoring import channel_history, fillers, gptzero, youtube
 
 logger = logging.getLogger(__name__)
 
@@ -25,12 +25,16 @@ def _safe(criterion_name: str, fn, *args) -> dict[str, Any]:
         return fn(*args)
     except Exception:
         logger.exception("criterion %s failed", criterion_name)
-        return {
-            "criterion": criterion_name,
-            "deduction": 0,
-            "applied": False,
-            "detail": "Criterion unavailable (upstream error).",
-        }
+        return _unavailable(criterion_name, "Criterion unavailable (upstream error).")
+
+
+def _unavailable(criterion_name: str, detail: str) -> dict[str, Any]:
+    return {
+        "criterion": criterion_name,
+        "deduction": 0,
+        "applied": False,
+        "detail": detail,
+    }
 
 
 def evaluate_video(
@@ -52,6 +56,19 @@ def evaluate_video(
                 _safe("upload_pattern", youtube.score_upload_pattern, channel, video_length_seconds)
             )
             breakdown.append(_safe("account_age", youtube.score_account_age, channel))
+        else:
+            breakdown.extend(
+                _unavailable(name, "Channel data unavailable (YouTube API not reachable).")
+                for name in ("upload_pattern", "account_age")
+            )
+        breakdown.append(
+            _safe("channel_history", channel_history.score_channel, channel_id, video_id)
+        )
+    else:
+        breakdown.extend(
+            _unavailable(name, "No channel ID supplied for this video.")
+            for name in ("upload_pattern", "account_age", "channel_history")
+        )
 
     score = max(0.0, STARTING_SCORE - sum(item["deduction"] for item in breakdown))
 

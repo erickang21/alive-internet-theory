@@ -1,5 +1,9 @@
 import { MESSAGE_TYPES } from "../shared/constants.js";
-import { extractVideoMetadata, getPagePlayerResponse } from "./playerResponse.js";
+import {
+  extractVideoMetadata,
+  fetchAndroidPlayerResponse,
+  getPagePlayerResponse,
+} from "./playerResponse.js";
 import { getTranscript } from "./transcript.js";
 import { removeOverlay, renderError, renderEvaluation, renderLoading } from "./overlay.js";
 
@@ -24,10 +28,16 @@ async function evaluateCurrentVideo() {
 
   renderLoading();
   try {
-    const playerResponse = getPagePlayerResponse();
+    // The inline ytInitialPlayerResponse still describes the previous video
+    // after SPA navigation, so it only counts when its video ID matches.
+    const pageResponse = getPagePlayerResponse();
+    const pageIsFresh = pageResponse?.videoDetails?.videoId === videoId;
+    const playerResponse = pageIsFresh ? pageResponse : await fetchAndroidPlayerResponse(videoId);
     const metadata = extractVideoMetadata(playerResponse);
 
-    const transcript = await getTranscript(videoId, playerResponse);
+    const transcript = await getTranscript(videoId, playerResponse, {
+      allowAndroidFallback: pageIsFresh,
+    });
     if (!transcript?.text) {
       renderError("No captions available for this video, so it can't be analyzed.");
       return;

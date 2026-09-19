@@ -1,11 +1,15 @@
+import logging
 from datetime import UTC, datetime
 from statistics import median
 from typing import Any
 
 import requests
+from pymongo.errors import PyMongoError
 
 from backend.config import config
-from backend.database import ChannelCacheRepository
+from backend.database import ChannelCacheRepository, DatabaseUnavailableError
+
+logger = logging.getLogger(__name__)
 
 BASE_URL = "https://www.googleapis.com/youtube/v3"
 
@@ -28,10 +32,17 @@ def _get(path: str, params: dict[str, Any]) -> dict[str, Any]:
 
 
 def fetch_channel(channel_id: str) -> dict[str, Any]:
-    repo = ChannelCacheRepository()
-    cached = repo.find_by_channel_id(channel_id)
-    if cached:
-        return cached
+    # The channel cache is an optimization; a missing database should not stop
+    # the YouTube criteria from running.
+    repo = None
+    try:
+        repo = ChannelCacheRepository()
+        cached = repo.find_by_channel_id(channel_id)
+        if cached:
+            return cached
+    except (DatabaseUnavailableError, PyMongoError):
+        logger.warning("channel cache unavailable; fetching %s uncached", channel_id)
+        repo = None
 
     data = _get("channels", {"part": "snippet,contentDetails", "id": channel_id})
     item = data["items"][0]
@@ -51,14 +62,18 @@ def fetch_channel(channel_id: str) -> dict[str, Any]:
         for entry in playlist.get("items", [])
     ]
 
-    return repo.upsert(
-        {
-            "channel_id": channel_id,
-            "created_at": item["snippet"]["publishedAt"],
-            "title": item["snippet"].get("title"),
-            "recent_uploads": uploads,
-        }
-    )
+    channel = {
+        "channel_id": channel_id,
+        "created_at": item["snippet"]["publishedAt"],
+        "title": item["snippet"].get("title"),
+        "recent_uploads": uploads,
+    }
+    if repo is not None:
+        try:
+            repo.upsert(channel)
+        except (DatabaseUnavailableError, PyMongoError):
+            logger.warning("channel cache unavailable; %s not cached", channel_id)
+    return channel
 
 
 def _parse_iso(value: str) -> datetime:

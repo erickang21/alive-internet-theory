@@ -21,8 +21,9 @@ export function getPagePlayerResponse() {
 }
 
 // The youtubei /player endpoint 403s chrome-extension:// origins, so the call
-// runs in a MAIN-world injected script and the result comes back via postMessage.
-export function fetchPlayerResponseViaInjection(videoId) {
+// runs in the MAIN-world content script (main-world.js, registered in the
+// manifest at document_start) and the result comes back via postMessage.
+export function fetchAndroidPlayerResponse(videoId) {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       window.removeEventListener("message", onMessage);
@@ -41,23 +42,8 @@ export function fetchPlayerResponseViaInjection(videoId) {
     };
 
     window.addEventListener("message", onMessage);
-    injectMainWorldScript().then(() => {
-      window.postMessage({ type: MESSAGE_TYPES.FETCH_PLAYER_RESPONSE, videoId }, "*");
-    });
+    window.postMessage({ type: MESSAGE_TYPES.FETCH_PLAYER_RESPONSE, videoId }, "*");
   });
-}
-
-let injectionPromise = null;
-
-function injectMainWorldScript() {
-  injectionPromise ??= new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = chrome.runtime.getURL("dist/main-world.js");
-    script.onload = resolve;
-    script.onerror = () => reject(new Error("failed to inject main-world script"));
-    document.documentElement.appendChild(script);
-  });
-  return injectionPromise;
 }
 
 export function extractVideoMetadata(playerResponse) {

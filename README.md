@@ -59,11 +59,26 @@ python -m backend.api.app
 
 The API listens on `http://127.0.0.1:5000`; check it with `curl http://127.0.0.1:5000/health`.
 
-**Use the extension:** open any YouTube watch or Shorts page. The overlay appears in the top right, shows "Analyzing…" while the transcript is fetched and scored, then displays the verdict with an expandable per-criterion breakdown. Evaluations are cached in Atlas, so revisiting a video is instant.
+**Use the extension:** open any YouTube watch or Shorts page. The overlay appears in the top right, shows "Analyzing…" while the transcript is fetched and scored, then displays the verdict with an expandable per-criterion breakdown. The first visit to a video runs the full evaluation and saves it to Atlas; every later visit (by anyone) serves the stored result instantly.
+
+**Degraded mode:** the app still runs with missing or wrong credentials. Without Atlas, evaluations are computed fresh on every visit instead of cached; without the GPTZero or YouTube keys, those criteria show as "unavailable" in the breakdown and deduct nothing. Each criterion degrades independently, so a partial `.env` still produces a verdict from whatever data is reachable.
 
 **After changing frontend code:** rebuild with `npm run build` (or leave `npm run watch` running), then click the reload icon on the extension card in `chrome://extensions` and refresh the YouTube tab. Backend code changes only need the Flask process restarted (or set `FLASK_DEBUG=1` in `backend/.env` for auto-reload).
 
+## Scoring
+
+Every video starts at 100 and loses points per AI signal; the verdict bands are **Likely human** (≥75), **Possibly AI** (45–74), and **AI Slop** (<45).
+
+| Criterion | Max deduction | Signal |
+|---|---|---|
+| GPTZero transcript scan | 45 | Document-level AI probability weighted by confidence, backstopped by the ratio of AI-flagged sentences (catches humanized scripts the document model misses) |
+| Filler words / stutters | 20 | Near-zero fillers on a long auto-generated (ASR) transcript reads as scripted; skipped for manual/translated tracks |
+| Upload cadence | 10 | Sustained faster-than-daily long-form uploads exceed human production capacity |
+| Channel history | 10 | Fraction of the channel's previously evaluated videos that scored as AI |
+| Account age | 5 | Channels younger than ~6 months |
+
 ## Development
 
+- Backend tests: `pip install -r backend/requirements-dev.txt`, then `python -m pytest backend/tests` from the repo root (no credentials or network needed — external services are faked)
 - Backend lint/format: `ruff check backend && ruff format backend` ([ruff](https://docs.astral.sh/ruff/))
 - Frontend lint/format: `npm run lint` and `npm run format` in `frontend/`
