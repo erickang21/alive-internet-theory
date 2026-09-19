@@ -11,28 +11,59 @@ backend/scoring/     Scoring engine (starts at 100, deducts per AI evidence)
 backend/database/    MongoDB Atlas repositories (evaluations, channel cache, community votes)
 ```
 
-## Backend setup
+## Runbook
+
+### 1. Install (first time)
+
+Prerequisites: Python 3.11+, Node.js 20+, Chrome, and accounts for the three external services below.
+
+**Gather credentials:**
+
+1. **MongoDB Atlas** — create a free cluster at [cloud.mongodb.com](https://cloud.mongodb.com), add a database user, allow your IP under Network Access, then copy the connection string from Database → Connect → Drivers. Collections and indexes are created automatically on first use.
+2. **GPTZero** — get an API key (hackathon form) for `api.gptzero.me`.
+3. **YouTube Data API v3** — in [console.cloud.google.com](https://console.cloud.google.com), create a project, enable "YouTube Data API v3", and create an API key (no OAuth needed for public reads).
+
+**Backend:**
 
 ```bash
 cd backend
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env   # then fill in real keys
-cd .. && python -m backend.api.app
+cp .env.example .env
 ```
 
-Requires a MongoDB Atlas cluster (`MONGODB_URI`), a GPTZero API key, and a YouTube Data API v3 key — see `backend/.env.example`.
+Edit `backend/.env` and fill in `GPTZERO_API_KEY`, `YOUTUBE_API_KEY`, and `MONGODB_URI` with the values gathered above. Never commit `.env` — it is gitignored.
 
-Lint/format with [ruff](https://docs.astral.sh/ruff/): `ruff check backend && ruff format backend`.
-
-## Frontend setup
+**Frontend:**
 
 ```bash
 cd frontend
 npm install
-npm run build          # or: npm run watch
+npm run build
 ```
 
-Then load `frontend/` as an unpacked extension at `chrome://extensions` (enable Developer mode → "Load unpacked"). Open any YouTube watch or Shorts page; the overlay appears top-right.
+**Load the extension into Chrome:**
 
-Lint/format: `npm run lint` and `npm run format`.
+1. Open `chrome://extensions`
+2. Enable **Developer mode** (top right)
+3. Click **Load unpacked** and select the `frontend/` directory
+
+### 2. Run the app
+
+**Start the backend** (from the repo root, with the venv active):
+
+```bash
+source backend/.venv/bin/activate
+python -m backend.api.app
+```
+
+The API listens on `http://127.0.0.1:5000`; check it with `curl http://127.0.0.1:5000/health`.
+
+**Use the extension:** open any YouTube watch or Shorts page. The overlay appears in the top right, shows "Analyzing…" while the transcript is fetched and scored, then displays the verdict with an expandable per-criterion breakdown. Evaluations are cached in Atlas, so revisiting a video is instant.
+
+**After changing frontend code:** rebuild with `npm run build` (or leave `npm run watch` running), then click the reload icon on the extension card in `chrome://extensions` and refresh the YouTube tab. Backend code changes only need the Flask process restarted (or set `FLASK_DEBUG=1` in `backend/.env` for auto-reload).
+
+## Development
+
+- Backend lint/format: `ruff check backend && ruff format backend` ([ruff](https://docs.astral.sh/ruff/))
+- Frontend lint/format: `npm run lint` and `npm run format` in `frontend/`
