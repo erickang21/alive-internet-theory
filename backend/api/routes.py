@@ -1,7 +1,6 @@
 from flask import Blueprint, jsonify, request
 
 from backend.database import CommunityVoteRepository, EvaluationRepository
-from backend.scoring import evaluate_video
 
 api = Blueprint("api", __name__)
 
@@ -19,47 +18,14 @@ def get_evaluation():
     if not video_id:
         return jsonify({"error": "video_id query parameter is required"}), 400
 
+    # Evaluations are written offline by `python -m backend.analyze`; the API
+    # only serves them.
     evaluation = EvaluationRepository().find_by_video_id(video_id)
     if evaluation is None:
-        return jsonify({"error": "no evaluation for this video yet"}), 404
+        return jsonify({"error": "this video hasn't been analyzed"}), 404
 
     evaluation["community_votes"] = CommunityVoteRepository().tally(video_id)
     return jsonify(evaluation)
-
-
-@api.post("/video/evaluation")
-def create_evaluation():
-    body = request.get_json(silent=True) or {}
-    video_id = body.get("video_id")
-    transcript = body.get("transcript", {})
-    metadata = body.get("metadata", {})
-
-    if not video_id:
-        return jsonify({"error": "video_id is required"}), 400
-    if not transcript.get("text"):
-        return jsonify({"error": "transcript.text is required"}), 400
-
-    repo = EvaluationRepository()
-    existing = repo.find_by_video_id(video_id)
-    if existing and not body.get("force_refresh"):
-        return jsonify(existing)
-
-    evaluation = evaluate_video(
-        video_id=video_id,
-        transcript=transcript["text"],
-        track_kind=transcript.get("kind"),
-        channel_id=metadata.get("channel_id"),
-        video_length_seconds=int(metadata.get("length_seconds") or 0),
-    )
-    evaluation["metadata"] = {
-        "length_seconds": metadata.get("length_seconds"),
-        "publish_date": metadata.get("publish_date"),
-        "author": metadata.get("author"),
-        "transcript_kind": transcript.get("kind"),
-        "transcript_language": transcript.get("language"),
-    }
-    repo.upsert(evaluation)
-    return jsonify(evaluation), 201
 
 
 @api.post("/video/community-vote")

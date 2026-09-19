@@ -1,6 +1,9 @@
 alembic>=1.16
+anthropic>=1.7
+faster-whisper>=1.2
 flask>=3.0
 flask-cors>=4.0
 python-dotenv>=1.0
 requests>=2.31
 sqlalchemy>=2.0
+yt-dlp[default]>=2026.8.19

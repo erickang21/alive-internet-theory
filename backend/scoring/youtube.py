@@ -2,13 +2,6 @@ from datetime import UTC, datetime
 from statistics import median
 from typing import Any
 
-import requests
-
-from backend.config import config
-from backend.database import ChannelCacheRepository
-
-BASE_URL = "https://www.googleapis.com/youtube/v3"
-
 UPLOAD_PATTERN_MAX_DEDUCTION = 10
 ACCOUNT_AGE_MAX_DEDUCTION = 5
 
@@ -17,48 +10,6 @@ ACCOUNT_AGE_MAX_DEDUCTION = 5
 SUSPICIOUS_MEDIAN_GAP_HOURS = 20
 SHORT_VIDEO_SECONDS = 90
 YOUNG_ACCOUNT_DAYS = 180
-
-
-def _get(path: str, params: dict[str, Any]) -> dict[str, Any]:
-    response = requests.get(
-        f"{BASE_URL}/{path}", params={**params, "key": config.youtube_api_key}, timeout=15
-    )
-    response.raise_for_status()
-    return response.json()
-
-
-def fetch_channel(channel_id: str) -> dict[str, Any]:
-    repo = ChannelCacheRepository()
-    cached = repo.find_by_channel_id(channel_id)
-    if cached:
-        return cached
-
-    data = _get("channels", {"part": "snippet,contentDetails", "id": channel_id})
-    item = data["items"][0]
-    uploads_playlist_id = item["contentDetails"]["relatedPlaylists"]["uploads"]
-
-    playlist = _get(
-        "playlistItems",
-        {"part": "contentDetails", "playlistId": uploads_playlist_id, "maxResults": 50},
-    )
-    uploads = [
-        {
-            "video_id": entry["contentDetails"]["videoId"],
-            # videoPublishedAt, not snippet.publishedAt: the latter is when the
-            # video was added to the playlist, which lags for older uploads.
-            "published_at": entry["contentDetails"].get("videoPublishedAt"),
-        }
-        for entry in playlist.get("items", [])
-    ]
-
-    return repo.upsert(
-        {
-            "channel_id": channel_id,
-            "created_at": item["snippet"]["publishedAt"],
-            "title": item["snippet"].get("title"),
-            "recent_uploads": uploads,
-        }
-    )
 
 
 def _parse_iso(value: str) -> datetime:
@@ -100,8 +51,19 @@ def score_upload_pattern(channel: dict[str, Any], video_length_seconds: int) -> 
 
 
 def score_account_age(channel: dict[str, Any]) -> dict[str, Any]:
-    created_at = _parse_iso(channel["created_at"])
-    age_days = (datetime.now(UTC) - created_at).days
+    oldest_upload_at = channel.get("oldest_upload_at")
+    if not oldest_upload_at:
+        return {
+            "criterion": "account_age",
+            "deduction": 0,
+            "applied": False,
+            "detail": "No public uploads to date the channel by.",
+        }
+
+    # YouTube's channel creation date isn't available through yt-dlp, so the
+    # oldest upload stands in for it. That undercounts channels that sat empty
+    # before their first upload.
+    age_days = (datetime.now(UTC) - _parse_iso(oldest_upload_at)).days
 
     deduction = 0.0
     if age_days < YOUNG_ACCOUNT_DAYS:
@@ -111,6 +73,6 @@ def score_account_age(channel: dict[str, Any]) -> dict[str, Any]:
         "criterion": "account_age",
         "deduction": deduction,
         "applied": True,
-        "detail": f"Channel is {age_days} days old.",
-        "evidence": {"age_days": age_days},
+        "detail": f"Channel's oldest upload is {age_days} days old.",
+        "evidence": {"oldest_upload_age_days": age_days},
     }

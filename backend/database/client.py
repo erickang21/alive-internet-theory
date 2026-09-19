@@ -13,6 +13,8 @@ from backend.config import config
 from backend.database.models import Channel, CommunityVote, Video
 
 CHANNEL_CACHE_TTL = timedelta(hours=24)
+# Evaluation keys stored as their own `videos` columns rather than inside `data`.
+VIDEO_COLUMNS = ("is_educational", "thesis", "hallucinated")
 ALEMBIC_INI = Path(__file__).parents[1] / "alembic.ini"
 
 
@@ -68,16 +70,16 @@ class EvaluationRepository:
         stmt = insert(Video).values(
             video_id=evaluation["video_id"],
             channel_id=evaluation.get("channel_id"),
-            data=evaluation,
+            data={k: v for k, v in evaluation.items() if k not in VIDEO_COLUMNS},
+            **{column: evaluation.get(column) for column in VIDEO_COLUMNS},
             created_at=now,
             updated_at=now,
         )
         stmt = stmt.on_conflict_do_update(
             index_elements=[Video.video_id],
             set_={
-                "channel_id": stmt.excluded.channel_id,
-                "data": stmt.excluded.data,
-                "updated_at": stmt.excluded.updated_at,
+                column: stmt.excluded[column]
+                for column in ("channel_id", "data", *VIDEO_COLUMNS, "updated_at")
             },
         )
         with Session(get_engine()) as session, session.begin():
@@ -89,6 +91,7 @@ class EvaluationRepository:
     def _to_dict(video: Video) -> dict[str, Any]:
         return {
             **video.data,
+            **{column: getattr(video, column) for column in VIDEO_COLUMNS},
             "created_at": _isoformat(video.created_at),
             "updated_at": _isoformat(video.updated_at),
         }

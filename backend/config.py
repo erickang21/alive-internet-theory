@@ -10,10 +10,15 @@ load_dotenv(Path(__file__).parent / ".env")
 @dataclass(frozen=True)
 class Config:
     gptzero_api_key: str = field(default_factory=lambda: os.environ.get("GPTZERO_API_KEY", ""))
-    youtube_api_key: str = field(default_factory=lambda: os.environ.get("YOUTUBE_API_KEY", ""))
     sqlite_path: str = field(
         default_factory=lambda: os.environ.get(
             "SQLITE_PATH", str(Path(__file__).parent / "data" / "alive_internet_theory.db")
+        )
+    )
+    # Downloaded videos, thumbnails, and captions, one directory per video ID.
+    media_dir: str = field(
+        default_factory=lambda: os.environ.get(
+            "MEDIA_DIR", str(Path(__file__).parent / "data" / "media")
         )
     )
     host: str = field(default_factory=lambda: os.environ.get("HOST", "127.0.0.1"))

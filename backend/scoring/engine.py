@@ -1,7 +1,8 @@
 import logging
 from typing import Any
 
-from backend.scoring import fillers, gptzero, youtube
+from backend import ytdlp
+from backend.scoring import fact_check, fillers, gptzero, youtube
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +20,7 @@ def _verdict(score: float) -> str:
 
 
 def _safe(criterion_name: str, fn, *args) -> dict[str, Any]:
-    # One flaky upstream API (GPTZero rate limit, YouTube quota) should degrade
+    # One flaky upstream (GPTZero rate limit, YouTube blocking yt-dlp) should degrade
     # that criterion, not fail the whole evaluation.
     try:
         return fn(*args)
@@ -44,9 +45,11 @@ def evaluate_video(
         _safe("gptzero_transcript", gptzero.score_transcript, transcript),
         _safe("filler_words", fillers.score_transcript, transcript, track_kind),
     ]
+    fact_check_result = _safe("fact_check", fact_check.score_transcript, transcript)
+    breakdown.append(fact_check_result)
 
     if channel_id:
-        channel = _safe("channel_fetch", youtube.fetch_channel, channel_id)
+        channel = _safe("channel_fetch", ytdlp.fetch_channel, channel_id)
         if channel.get("channel_id"):
             breakdown.append(
                 _safe("upload_pattern", youtube.score_upload_pattern, channel, video_length_seconds)
@@ -54,6 +57,7 @@ def evaluate_video(
             breakdown.append(_safe("account_age", youtube.score_account_age, channel))
 
     score = max(0.0, STARTING_SCORE - sum(item["deduction"] for item in breakdown))
+    facts = fact_check_result.get("evidence", {})
 
     return {
         "video_id": video_id,
@@ -61,4 +65,8 @@ def evaluate_video(
         "score": round(score, 1),
         "verdict": _verdict(score),
         "breakdown": breakdown,
+        # None when the fact check couldn't run (no API key, upstream error).
+        "is_educational": facts.get("is_educational"),
+        "thesis": facts.get("thesis"),
+        "hallucinated": facts.get("hallucinated"),
     }

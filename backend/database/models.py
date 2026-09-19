@@ -27,8 +27,14 @@ class Video(Base):
 
     video_id: Mapped[str] = mapped_column(primary_key=True)
     channel_id: Mapped[str | None] = mapped_column(index=True)
-    # The evaluation as the API returns it: score, verdict, breakdown, metadata.
+    # The rest of the evaluation as the API returns it: score, verdict,
+    # breakdown, metadata.
     data: Mapped[dict[str, Any]]
+    # Fact check results; null when the video isn't educational (thesis,
+    # hallucinated) or the check couldn't run (all three).
+    is_educational: Mapped[bool | None]
+    thesis: Mapped[str | None]
+    hallucinated: Mapped[bool | None]
     created_at: Mapped[datetime]
     updated_at: Mapped[datetime]
 
@@ -37,7 +43,7 @@ class Channel(Base):
     __tablename__ = "channels"
 
     channel_id: Mapped[str] = mapped_column(primary_key=True)
-    # YouTube Data API channel info plus its recent uploads.
+    # Channel info from yt-dlp: title, oldest upload, recent uploads.
     data: Mapped[dict[str, Any]]
     cached_at: Mapped[datetime]
 
