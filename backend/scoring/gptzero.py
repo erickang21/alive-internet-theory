@@ -27,10 +27,13 @@ def _session() -> requests.Session:
     )
     return session
 
+
 @retry(on=requests.HTTPError, attempts=5)
 def predict_text(document: str) -> dict[str, Any]:
     response = _session().post(
-        f"{BASE_URL}/v2/predict/text", json={"document": document[:min(len(document), 45000)]}, timeout=30
+        f"{BASE_URL}/v2/predict/text",
+        json={"document": document[: min(len(document), 45000)]},
+        timeout=30,
     )
     response.raise_for_status()
     return response.json()["documents"][0]

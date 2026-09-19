@@ -29,7 +29,7 @@ async function showCurrentVideo() {
   renderLoading();
   try {
     const response = await chrome.runtime.sendMessage({
-      type: MESSAGE_TYPES.GET_EVALUATION,
+      type: MESSAGE_TYPES.REQUEST_EVALUATION,
       videoId,
     });
 
@@ -37,8 +37,11 @@ async function showCurrentVideo() {
     if (!response?.ok) {
       throw new Error(response?.error ?? "no response from service worker");
     }
-    if (response.evaluation) renderEvaluation(response.evaluation);
-    else renderNotAnalyzed();
+    // An unanalyzed video comes back as a status, not an evaluation. The request
+    // itself has queued it for indexing in the background, so the verdict shows
+    // up on a later visit; the viewer only sees that it isn't analyzed yet.
+    if (response.result.status) renderNotAnalyzed();
+    else renderEvaluation(response.result);
   } catch (error) {
     if (videoId !== currentVideoId) return;
     console.warn("[alive-internet-theory]", error);

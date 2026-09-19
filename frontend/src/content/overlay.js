@@ -37,7 +37,7 @@ function renderNotice(badgeText, message) {
 
 export function renderEvaluation(evaluation) {
   const overlay = ensureOverlay();
-  const verdict = VERDICTS[evaluation.verdict] ?? VERDICTS.possibly_ai;
+  const verdict = VERDICTS[evaluation.verdict] ?? VERDICTS.likely_ai;
 
   overlay.className = "ait-overlay";
   overlay.innerHTML = `

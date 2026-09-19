@@ -1,6 +1,6 @@
 # Quick Start & Usage Guide
 
-The extension doesn't analyze anything itself. Devs run the analyze script on the videos they choose, it stores the results, and the extension shows them. All commands run from the repo root.
+Opening a video with the extension loaded queues it for analysis in the background. The overlay just says "Not analyzed" on that first visit, and the verdict appears the next time you open the video after the backend finishes. The analyze script is for batch runs and re-analysis. All commands run from the repo root.
 
 ## Quick start (Docker)
 
@@ -24,16 +24,11 @@ You need Docker, Node.js 20+, and Chrome.
    ```
    In Chrome, open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked**, and pick the `frontend/` folder.
 
-4. **Analyze a video.**
-   ```bash
-   docker compose exec backend python -m backend.analyze "https://www.youtube.com/shorts/R6yNUnRXZ64"
-   ```
+4. **Open a video in Chrome.** The overlay in the top right says "Not analyzed" while the backend analyzes it in the background. Reopen the video once it's done (usually under a minute, longer for a new channel or when Whisper is needed) to see the verdict. You can follow progress with `docker compose logs -f backend`.
 
-5. **Open that Short in Chrome.** The overlay in the top right shows its verdict.
+## Analyzing videos in batches
 
-## Analyzing videos
-
-With the stack running, submit videos to the running container:
+Opening a video queues it by itself, so the script is for the rest: channels, playlists, files of targets, and `--force` re-analysis. With the stack running, submit videos to the running container:
 
 ```bash
 docker compose exec backend python -m backend.analyze <target> [<target> …] [--limit N] [--force]
@@ -92,8 +87,8 @@ Each stage prints a timestamped line: the queue size, `[2/7] <id>: starting`, me
 
 On any watch or Shorts page, the overlay shows one of:
 
-- **Likely human / Possibly AI / AI Slop** with `Score: N / 100`. Scores start at 100: 75 and up is Likely human, 45 to under 75 is Possibly AI, and below 45 is AI Slop. **Show breakdown** lists each criterion's deduction, or `n/a` with the reason when a criterion didn't apply.
-- **Not analyzed:** nobody has run the analyze script on this video yet.
+- **Likely human / Likely AI / AI Slop** with `Score: N / 100`. Scores start at 100: 75 and up is Likely human, 45 to under 75 is Likely AI, and below 45 is AI Slop. **Show breakdown** lists each criterion's deduction, or `n/a` with the reason when a criterion didn't apply.
+- **Not analyzed:** there's no verdict yet. Opening the video queued it in the background (if it wasn't already), so reopen it later. If it never gets a verdict, the analysis failed: check `docker compose logs -f backend`. Failures are remembered until the backend restarts.
 - **Unavailable: "Couldn't reach the backend. Is it running?"** The API isn't answering on `127.0.0.1:5000` (see Troubleshooting).
 
 ### From the API
@@ -143,7 +138,7 @@ You can run `ant auth login` instead of putting an Anthropic key in `.env`. A ve
 | You see | Cause and fix |
 |---|---|
 | Overlay: "Couldn't reach the backend. Is it running?" | The stack is down. Run `docker compose ps`; if nothing is up, run `docker compose up -d`, then `curl http://127.0.0.1:5000/health`. |
-| Overlay: "Not analyzed" | Expected for any video you haven't run the analyze script on. |
+| Overlay still says "Not analyzed" after a while | Either it's still running (a new channel's upload dates, Whisper) or it failed. `docker compose logs -f backend` shows which, and why (yt-dlp break, age-restricted video). A failed video isn't retried until the backend restarts: fix the cause, run `docker compose restart backend`, and reopen the video. |
 | `zsh: no matches found: https://…` | Put the URL in quotes. |
 | `env file …/backend/.env not found` | Create it: `cp backend/.env.example backend/.env` and add your keys. |
 | `service "backend" is not running` | `exec` needs the stack up. Run `docker compose up -d`, or use `docker compose run --rm backend …` instead. |
