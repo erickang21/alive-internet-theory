@@ -1,6 +1,6 @@
 # Alive Internet Theory
 
-Chrome extension that overlays on YouTube videos and Shorts and rates them **Likely human / Possibly AI / AI Slop**. Devs choose which videos to analyze and run an analyze script, which pulls everything from YouTube with yt-dlp, scores it, and stores the result in SQLite. A Flask API serves those results to the extension. See [CLAUDE.md](CLAUDE.md) for the full design reference.
+Chrome extension that overlays on YouTube videos and Shorts and rates them **Likely human / Possibly AI / AI Slop**. Devs choose which videos to analyze and run an analyze script, which pulls everything from YouTube with yt-dlp, scores it, and stores the result in SQLite. A Flask API serves those results to the extension. **New here? Start with [GUIDE.md](GUIDE.md)** (quick start and usage). See [CLAUDE.md](CLAUDE.md) for the full design reference.
 
 ## Layout
 
