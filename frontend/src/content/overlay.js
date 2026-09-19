@@ -18,7 +18,7 @@ export function renderError(message) {
 }
 
 export function renderNotAnalyzed() {
-  renderNotice("Not analyzed", "This video hasn't been analyzed yet.");
+  renderNotice("Not analyzed", "This video hasn't been analyzed yet. Check back later.");
 }
 
 function renderNotice(badgeText, message) {
