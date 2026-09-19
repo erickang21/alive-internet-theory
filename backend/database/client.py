@@ -5,14 +5,14 @@ from typing import Any
 
 from alembic import command
 from alembic.config import Config as AlembicConfig
-from sqlalchemy import Engine, create_engine, event, func, select
+from sqlalchemy import Engine, create_engine, event, select
 from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.engine.interfaces import DBAPIConnection
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import ConnectionPoolEntry
 
 from backend.config import config
-from backend.database.models import Channel, CommunityVote, Video
+from backend.database.models import Channel, Video
 
 CHANNEL_CACHE_TTL = timedelta(hours=24)
 # Evaluation keys stored as their own `videos` columns rather than inside `data`.
@@ -53,7 +53,7 @@ def _isoformat(value: datetime) -> str:
 
 
 # Upserts use INSERT … ON CONFLICT rather than get-then-add so two concurrent
-# requests for the same key (e.g. a double-clicked vote) can't both insert.
+# requests for the same key can't both insert.
 
 
 class EvaluationRepository:
@@ -124,25 +124,3 @@ class ChannelCacheRepository:
             _ = session.execute(stmt)
         channel["cached_at"] = now.isoformat()
         return channel
-
-
-class CommunityVoteRepository:
-    def record_vote(self, video_id: str, voter_id: str, vote: str) -> None:
-        stmt = insert(CommunityVote).values(
-            video_id=video_id, voter_id=voter_id, vote=vote, voted_at=_utcnow()
-        )
-        stmt = stmt.on_conflict_do_update(
-            index_elements=[CommunityVote.video_id, CommunityVote.voter_id],
-            set_={"vote": stmt.excluded.vote, "voted_at": stmt.excluded.voted_at},
-        )
-        with Session(get_engine()) as session, session.begin():
-            _ = session.execute(stmt)
-
-    def tally(self, video_id: str) -> dict[str, int]:
-        query = (
-            select(CommunityVote.vote, func.count())
-            .where(CommunityVote.video_id == video_id)
-            .group_by(CommunityVote.vote)
-        )
-        with Session(get_engine()) as session:
-            return dict(session.execute(query).tuples().all())

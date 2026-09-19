@@ -10,7 +10,8 @@ backend/analyze.py         CLI that analyzes videos and writes evaluations
 backend/ytdlp.py           yt-dlp: metadata, thumbnail, captions, audio for Whisper, channel uploads
 backend/transcripts.py     Caption parsing, local Whisper speech-to-text fallback
 backend/scoring/           Scoring engine (starts at 100, deducts per AI evidence)
-backend/api/               Flask API: GET /video/evaluation, POST /video/community-vote
+backend/api/               Flask API: GET /video/evaluation
+backend/community_votes/   Community feedback on evaluations (vote + overview endpoints)
 backend/database/          SQLAlchemy models + repositories on SQLite, Alembic migrations
 ```
 
