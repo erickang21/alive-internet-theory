@@ -9,7 +9,9 @@
     "watch": "node build.js --watch",
     "lint": "eslint src",
     "format": "prettier --write \"src/**/*.{js,css}\" \"*.{js,json}\"",
-    "format:check": "prettier --check \"src/**/*.{js,css}\" \"*.{js,json}\""
+    "format:check": "prettier --check \"src/**/*.{js,css}\" \"*.{js,json}\"",
+    "test": "node --test",
+    "demo": "node src/sidepanel/serve-demo.js"
   },
   "devDependencies": {
     "@eslint/js": "^9.9.0",
