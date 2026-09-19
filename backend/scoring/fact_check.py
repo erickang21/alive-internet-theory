@@ -1,7 +1,10 @@
 import json
+import logging
 from typing import Any
 
 import anthropic
+
+logger = logging.getLogger(__name__)
 
 MODEL = "claude-opus-5"
 # On a safety decline, the API re-runs the request on Anthropic's recommended
@@ -11,6 +14,16 @@ MAX_TOKENS = 16000
 MAX_SEARCHES = 5
 # A long search turn can pause server-side; resume it at most this many times.
 MAX_CONTINUATIONS = 5
+
+SKIPPED = {
+    "criterion": "fact_check",
+    "deduction": 0,
+    "applied": False,
+    "detail": "Skipped: no usable Anthropic credentials.",
+}
+# Set on the first credentials failure so the rest of the run skips the fact
+# check with one warning instead of an error per video.
+_credentials_unusable = False
 
 CLASSIFY_PROMPT = """Below is the transcript of a YouTube video.
 
@@ -78,8 +91,17 @@ def score_transcript(transcript: str) -> dict[str, Any]:
 
     Recorded for the breakdown but not yet scored: the deduction is still TBD.
     """
+    if _credentials_unusable:
+        return SKIPPED
     client = anthropic.Anthropic()
-    classification = _classify(client, transcript)
+    if client.api_key is None and client.auth_token is None and client.credentials is None:
+        _disable("no Anthropic credentials found")
+        return SKIPPED
+    try:
+        classification = _classify(client, transcript)
+    except (anthropic.AuthenticationError, anthropic.CredentialsError) as error:
+        _disable(f"Anthropic credentials didn't work: {str(error).rstrip('.')}")
+        return SKIPPED
     if not classification["is_educational"]:
         return {
             "criterion": "fact_check",
@@ -108,6 +130,16 @@ def score_transcript(transcript: str) -> dict[str, Any]:
             "sources": verdict["sources"],
         },
     }
+
+
+def _disable(reason: str) -> None:
+    global _credentials_unusable
+    _credentials_unusable = True
+    logger.warning(
+        "Skipping the fact check for this run: %s. Set ANTHROPIC_API_KEY in backend/.env "
+        "or run `ant auth login`.",
+        reason,
+    )
 
 
 def _classify(client: anthropic.Anthropic, transcript: str) -> dict[str, Any]:

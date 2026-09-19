@@ -23,7 +23,7 @@ Prerequisites: Node.js 20+, Chrome, and **either** Docker **or** Python 3.11+ wi
 **Gather credentials:**
 
 1. **GPTZero**: get an API key (hackathon form) for `api.gptzero.me`.
-2. **Anthropic**: create an API key at [console.anthropic.com](https://console.anthropic.com). It's used to fact-check educational videos.
+2. **Anthropic** (optional): create an API key at [console.anthropic.com](https://console.anthropic.com). It's used to fact-check educational videos. Without it, the analyze script logs one warning and skips the fact check; everything else still runs.
 
 **Backend:**
 

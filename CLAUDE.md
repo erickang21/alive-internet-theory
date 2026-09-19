@@ -96,7 +96,7 @@ The transcript goes through an LLM (Claude, `claude-opus-5`, Anthropic Python SD
 - `thesis` (string): the main thesis in one sentence. Set only when educational.
 - `hallucinated` (bool): **false only when independent third-party sources confirm the thesis is correct**. True when they contradict it or when nothing independent confirms it. Set only when educational.
 
-All three are null when the check couldn't run (missing credentials, upstream error). The breakdown entry also carries a justification and source URLs as evidence.
+All three are null when the check couldn't run. **Without usable Anthropic credentials** (none configured, a placeholder or invalid key, or an `ant` profile with no credentials file), the first video logs one warning and the fact check is skipped for the rest of the run without sending more requests. The breakdown says "Skipped: no usable Anthropic credentials." Everything else still runs and is stored. Adding a key later doesn't backfill: rerun those videos with `--force`. The breakdown entry also carries a justification and source URLs as evidence.
 
 Two calls: (1) classification with a JSON-schema `output_config.format`; (2) for educational videos only, verification with the server-side `web_search_20260209` tool (max 5 searches). The verdict comes back through a `strict` `report_verdict` tool, because JSON output formats don't mix reliably with web-search citations. The verify loop resumes `pause_turn` up to 5 times. Both calls set `fallbacks="default"` (beta `server-side-fallback-2026-07-01`) so a safety decline re-runs on Anthropic's recommended fallback model; a final `refusal` fails the criterion.
 
