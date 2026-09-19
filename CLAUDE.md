@@ -16,7 +16,8 @@ backend/analyze.py         CLI: resolve targets → download → transcript → 
 backend/ytdlp.py           All YouTube access (target expansion, downloads, channel uploads + 24h cache)
 backend/transcripts.py     Caption parsing (json3/vtt), faster-whisper fallback
 backend/scoring/           Scoring engine (starts at 100, deducts per AI evidence) + per-criterion modules
-backend/api/               Flask API: GET/POST /video/evaluation, POST /video/community-vote, background indexing
+backend/api/               Flask API: GET/POST /video/evaluation, background indexing
+backend/community_votes/   Community feedback on evaluations: POST /video/community-vote, GET /video/community-votes (never read by scoring)
 backend/database/          SQLAlchemy models + repositories on SQLite, Alembic migrations
 ```
 

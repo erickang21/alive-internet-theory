@@ -97,7 +97,7 @@ On any watch or Shorts page, the overlay shows one of:
 curl "http://127.0.0.1:5000/video/evaluation?video_id=jNQXAC9IVRw"
 ```
 
-Returns `score`, `verdict`, `breakdown`, the fact check fields (`is_educational`, `thesis`, `hallucinated`; null when not run), `metadata` (title, channel, length, publish date, transcript kind and language, media paths), and `community_votes`. Unanalyzed videos return 404. Votes are recorded with `POST /video/community-vote` and a JSON body `{"video_id", "voter_id", "vote": "human"|"ai"}`.
+Returns `score`, `verdict`, `breakdown`, the fact check fields (`is_educational`, `thesis`, `hallucinated`; null when not run), `metadata` (title, channel, length, publish date, transcript kind and language, media paths), and `community_votes`. Unanalyzed videos return 404. A community vote says whether the evaluation was right: record one with `POST /video/community-vote` and a JSON body `{"video_id", "voter_id", "vote": "agree"|"disagree"}` (one vote per voter per video; re-voting overwrites), and read the standalone overview with `GET /video/community-votes?video_id=…` — `{"votes": {"agree", "disagree"}, "total", "consensus"}`, where `consensus` is the majority side or null on a tie. Votes never affect scoring.
 
 ### Downloaded files
 
