@@ -3,7 +3,7 @@ from collections.abc import Callable
 from typing import Any, ParamSpec
 
 from backend import ytdlp
-from backend.scoring import fact_check, fillers, gptzero, youtube
+from backend.scoring import channel_history, fact_check, fillers, gptzero, youtube
 
 logger = logging.getLogger(__name__)
 
@@ -12,6 +12,12 @@ P = ParamSpec("P")
 STARTING_SCORE = 100
 LIKELY_HUMAN_THRESHOLD = 75
 LIKELY_AI_THRESHOLD = 45
+
+
+def _score(breakdown: list[dict[str, Any]]) -> float:
+    raw_score = STARTING_SCORE - sum(item["deduction"] for item in breakdown)
+    # Negative deductions are bonuses (e.g. a natural filler rate), so clamp both ends.
+    return round(min(100.0, max(0.0, raw_score)), 1)
 
 
 def _verdict(score: float) -> str:
@@ -78,15 +84,13 @@ def evaluate_video(
             )
             breakdown.append(_run("account_age", youtube.score_account_age, channel))
 
-    raw_score = STARTING_SCORE - sum(item["deduction"] for item in breakdown)
-    # Negative deductions are bonuses (e.g. a natural filler rate), so clamp both ends.
-    score = min(100.0, max(0.0, raw_score))
+    score = _score(breakdown)
     facts = fact_check_result.get("evidence", {})
 
     return {
         "video_id": video_id,
         "channel_id": channel_id,
-        "score": round(score, 1),
+        "score": score,
         "verdict": _verdict(score),
         "breakdown": breakdown,
         # None when the fact check couldn't run (no API key, upstream error).
@@ -94,3 +98,17 @@ def evaluate_video(
         "thesis": facts.get("thesis"),
         "hallucinated": facts.get("hallucinated"),
     }
+
+
+def apply_channel_history(
+    evaluation: dict[str, Any], siblings: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Add the channel-history criterion to a stored evaluation and rescore it.
+
+    This one criterion is applied when an evaluation is served rather than when it is
+    stored, because it depends on which of the channel's videos have been analyzed so
+    far: the first video of a channel would otherwise be stuck with an empty history.
+    """
+    breakdown = [*evaluation["breakdown"], channel_history.score_channel_history(siblings)]
+    score = _score(breakdown)
+    return {**evaluation, "breakdown": breakdown, "score": score, "verdict": _verdict(score)}

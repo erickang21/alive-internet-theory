@@ -62,8 +62,12 @@ class EvaluationRepository:
             video = session.get(Video, video_id)
             return self._to_dict(video) if video else None
 
-    def find_by_channel_id(self, channel_id: str, limit: int = 50) -> list[dict[str, Any]]:
+    def find_by_channel_id(
+        self, channel_id: str, exclude_video_id: str | None = None, limit: int = 50
+    ) -> list[dict[str, Any]]:
         query = select(Video).where(Video.channel_id == channel_id).limit(limit)
+        if exclude_video_id:
+            query = query.where(Video.video_id != exclude_video_id)
         with Session(get_engine()) as session:
             return [self._to_dict(video) for video in session.scalars(query)]
 

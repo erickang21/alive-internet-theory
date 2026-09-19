@@ -4,10 +4,26 @@ from flask import Blueprint, jsonify, request
 
 from backend.api import indexing
 from backend.database import CommunityVoteRepository, EvaluationRepository
+from backend.scoring import apply_channel_history
 
 api = Blueprint("api", __name__)
 
 VALID_VOTES = {"human", "ai"}
+
+
+def _serve(evaluation: dict[str, Any]) -> dict[str, Any]:
+    """Finish a stored evaluation: the channel-history criterion is scored here, on
+    the channel's other stored videos, so it reflects everything analyzed so far."""
+    video_id = evaluation["video_id"]
+    channel_id = evaluation.get("channel_id")
+    siblings = (
+        EvaluationRepository().find_by_channel_id(channel_id, exclude_video_id=video_id)
+        if channel_id
+        else []
+    )
+    evaluation = apply_channel_history(evaluation, siblings)
+    evaluation["community_votes"] = CommunityVoteRepository().tally(video_id)
+    return evaluation
 
 
 @api.get("/health")
@@ -25,8 +41,7 @@ def get_evaluation():
     if evaluation is None:
         return jsonify({"error": "this video hasn't been analyzed"}), 404
 
-    evaluation["community_votes"] = CommunityVoteRepository().tally(video_id)
-    return jsonify(evaluation)
+    return jsonify(_serve(evaluation))
 
 
 @api.post("/video/evaluation")
@@ -49,8 +64,7 @@ def request_evaluation():
                 return jsonify({"status": "indexing"}), 202
             return jsonify({"status": "failed", "detail": status})
 
-    evaluation["community_votes"] = CommunityVoteRepository().tally(video_id)
-    return jsonify(evaluation)
+    return jsonify(_serve(evaluation))
 
 
 @api.post("/video/community-vote")

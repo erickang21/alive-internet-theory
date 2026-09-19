@@ -7,7 +7,7 @@ Chrome extension that overlays on a YouTube video/Short and rates it **Likely hu
 **A video is analyzed in the background the first time someone opens it**, or when a dev runs the analyze script. The extension itself fetches no transcripts and runs no scoring, and it never shows that indexing is happening.
 
 1. The analysis pipeline (`backend/analyze.py`) uses **yt-dlp for all YouTube data** (metadata, thumbnail, captions, the audio track when Whisper needs it, channel uploads). It transcribes locally with Whisper when captions are missing, scores the video, and writes the evaluation to SQLite. Devs run it directly (`python -m backend.analyze <targets>`) for batches, channels/playlists, and `--force` re-analysis.
-2. The extension asks the API for the current video with `POST /video/evaluation`. A stored evaluation comes back as-is; otherwise the API quietly starts the same pipeline in a background thread (`backend/api/indexing.py`) and answers `202 {"status": "indexing"}`. Failures come back as `{"status": "failed", "detail": …}` and are held in memory only, so a backend restart clears them for another attempt. There are no automatic retries; a GPTZero failure degrades that one criterion like any other. `GET /video/evaluation?video_id=…` still serves stored rows without triggering anything; the other write is `POST /video/community-vote`.
+2. The extension asks the API for the current video with `POST /video/evaluation`. A stored evaluation comes back with one criterion scored at read time (channel history, see below) and the score and verdict recomputed from the full breakdown; otherwise the API quietly starts the same pipeline in a background thread (`backend/api/indexing.py`) and answers `202 {"status": "indexing"}`. Failures come back as `{"status": "failed", "detail": …}` and are held in memory only, so a backend restart clears them for another attempt. There are no automatic retries; a GPTZero failure degrades that one criterion like any other. `GET /video/evaluation?video_id=…` still serves stored rows without triggering anything; the other write is `POST /video/community-vote`.
 3. The extension makes that one request per video. It shows the verdict if there is one, and otherwise "Not analyzed". It doesn't poll, so a freshly indexed verdict appears the next time the video is opened.
 
 ```
@@ -31,9 +31,17 @@ Storage: SQLite at `SQLITE_PATH` (default `backend/data/alive_internet_theory.db
 | Stutters / filler words (absence ⇒ AI) | up to −20 | Transcript text analysis, ASR tracks only (see Filler-word section) |
 | Upload frequency + video length | up to −10 | Exact upload timestamps of the channel's latest 20 uploads via yt-dlp (see yt-dlp section) |
 | Account age | up to −5 | Exact timestamp of the channel's **oldest upload** via yt-dlp, a proxy because the creation date isn't available |
-| Recursive: author's other videos' AI scores | recursive | Channel uploads list + our own DB of past evaluations (not built yet) |
+| Channel history (`channel_history`) | **+10 to −10** | Average score of the channel's other stored evaluations (see below) |
 
 ---
+
+## Channel history (`backend/scoring/channel_history.py`) — the one read-time criterion
+
+A video gains up to **+10** when the channel's other analyzed videos look human and loses up to **−10** when they look like AI. The average of their scores maps linearly onto that range, with the likely-human threshold (75) as the neutral point: an average of 100 gives +10, 75 gives 0, 50 or below gives −10. The swing scales by `min(n / 5, 1)`, so one sibling can move the score by at most ±2 and five or more move the full ±10. The newest 20 siblings by publish date count, so a channel that recently turned to AI stops coasting on its old videos.
+
+**It is scored when an evaluation is served, not when it is stored** (`engine.apply_channel_history`, called from both `/video/evaluation` routes). Everything else is frozen at analysis time, but this criterion depends on what else we have analyzed since, and freezing it would leave every channel's first video permanently without a history. Two consequences: the stored `score`/`verdict` (and the score the analyze script logs) are the pre-adjustment numbers, and stored scores are therefore free of this criterion, so a channel's reputation can't feed on itself — siblings contribute their own content and channel signals only.
+
+A bonus is stored as a negative `deduction`, like the filler-word criterion's natural-rate bonus, and the engine clamps the total to 0–100, so a video already at 100 gains nothing.
 
 ## GPTZero API (source: GPTZero API Workshop slides — authoritative for this project)
 
