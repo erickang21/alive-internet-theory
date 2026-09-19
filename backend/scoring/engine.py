@@ -11,6 +11,15 @@ LIKELY_HUMAN_THRESHOLD = 75
 POSSIBLY_AI_THRESHOLD = 45
 
 
+class UpstreamScoringError(Exception):
+    """A core criterion's upstream failed (e.g. GPTZero timed out).
+
+    Raised instead of degrading the criterion so the caller stores nothing and
+    the request can be retried, rather than persisting a misleadingly perfect
+    score built without the scan that carries most of the signal.
+    """
+
+
 def _verdict(score: float) -> str:
     if score >= LIKELY_HUMAN_THRESHOLD:
         return "likely_human"
@@ -41,8 +50,16 @@ def evaluate_video(
     channel_id: str | None,
     video_length_seconds: int,
 ) -> dict[str, Any]:
+    # GPTZero is the bulk of the score, so a flaky upstream here isn't degraded
+    # like the others: it aborts the evaluation (nothing stored) for a retry.
+    try:
+        gptzero_result = gptzero.score_transcript(transcript)
+    except Exception as error:
+        logger.exception("criterion gptzero_transcript failed")
+        raise UpstreamScoringError("gptzero_transcript") from error
+
     breakdown = [
-        _safe("gptzero_transcript", gptzero.score_transcript, transcript),
+        gptzero_result,
         _safe("filler_words", fillers.score_transcript, transcript, track_kind),
     ]
     fact_check_result = _safe("fact_check", fact_check.score_transcript, transcript)

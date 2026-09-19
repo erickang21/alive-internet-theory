@@ -39,6 +39,8 @@ def request_evaluation():
         status = indexing.request(video_id)
         if status == indexing.PENDING:
             return jsonify({"status": "indexing"}), 202
+        if status == indexing.RETRY:
+            return jsonify({"status": "retry"}), 202
         if status != indexing.DONE:
             return jsonify({"status": "failed", "detail": status})
         # DONE but the read above missed it: the row landed between the two.
