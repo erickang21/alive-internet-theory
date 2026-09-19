@@ -97,10 +97,25 @@ _TODO: pending research — endpoints, params, quota costs, and extension-side s
 
 ## Transcript retrieval (feeds GPTZero + filler-word analysis)
 
-_TODO: pending research — timedtext/captions options, formats, filler-word preservation._
+**Decision: fetch transcripts client-side in the extension, on the youtube.com page, and POST the parsed text to our backend.** The browser has a residential IP + real cookies; server-side fetching from cloud IPs is broadly blocked by YouTube. (As of Sept 2026.)
+
+**Official API is a dead end:** Data API v3 `captions.list` (50 quota units) returns only track metadata; `captions.download` (200 units) requires OAuth **as the video owner** → 403 for third-party videos. Cannot be used.
+
+### Extension fetch strategy (in order)
+
+1. **Fast path:** read `ytInitialPlayerResponse.captions.playerCaptionsTracklistRenderer.captionTracks[]` from the watch page (each has `baseUrl`, `languageCode`, `kind` — `"asr"` = auto-generated). Same-origin `fetch(baseUrl + "&fmt=json3")` → JSON events with `segs[].utf8`, `tStartMs`, `dDurationMs`.
+   - Caveats: `ytInitialPlayerResponse` goes **stale on SPA navigation** (re-parse on navigation events); `baseUrl` is signed and **expires in hours**; tracks with `exp=xpe` in the URL are **PoToken-gated** and return an empty HTTP 200 to bare fetches — on empty body, fall through to (2).
+2. **Primary reliable path:** POST `https://www.youtube.com/youtubei/v1/player` with body `{context: {client: {clientName: "ANDROID", clientVersion: "20.x"}}, videoId}` from a MAIN-world injected script (the endpoint 403s on `chrome-extension://` origins). ANDROID-client caption URLs are signed differently and currently need **no PoToken**; fetch with `&fmt=json3`.
+3. **Last resort:** programmatically open the "Show transcript" panel and scrape the DOM (the page's own player handles PoToken).
+
+Shorts expose the same `captionTracks` structure via the same player response (use `/watch?v=<ID>` for the Short's ID if the Shorts page doesn't expose it).
+
+**Server-side fallback (batch/offline only, budget for breakage):** `youtube-transcript-api` (Python, maintained) — works only from residential IPs / rotating residential proxies, and is partially hit by the PoToken issue. npm `youtube-transcript` is abandoned; the Node option is `youtubei.js` (`getTranscript()`), same fragility. All of these are reverse-engineered and can break without notice.
 
 ---
 
 ## Filler-word criterion notes (−20)
 
-Detection itself is local text analysis over the transcript (no external API): count "um", "uh", "like", "you know", repeated-word stutters ("I- I think") per minute / per 100 words; zero or near-zero fillers on a long spoken transcript ⇒ AI signal. Key dependency: whether the transcript source preserves fillers (see Transcript section).
+Detection itself is local text analysis over the transcript (no external API): count "um", "uh", "like", "you know", repeated-word stutters ("I- I think") per minute / per 100 words; zero or near-zero fillers on a long spoken transcript ⇒ AI signal.
+
+**Apply this criterion ONLY to auto-generated tracks (`captionTracks[].kind == "asr"`).** YouTube ASR mostly preserves fillers/stutters (though inconsistently — it drops short "uh"s it can't decode), so *presence* of fillers is a solid human signal, but *absence* is weaker evidence than the −20 implies; consider scaling the deduction by transcript length/confidence. Manually-uploaded (`standard`) and translated tracks are filler-stripped by captioning convention — skip the criterion for those rather than falsely flagging a human video as AI.
