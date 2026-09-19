@@ -45,7 +45,7 @@ def score_transcript(transcript: str, track_kind: str | None) -> dict[str, Any]:
     filler_count = count_fillers(transcript)
     rate = filler_count / word_count * 100
     if rate >= HUMAN_FILLER_RATE_PER_100_WORDS:
-        deduction = -2.0
+        deduction = -5.0
         detail = f"Natural filler rate ({rate:.2f} per 100 words) — reads as human speech."
     else:
         # Absence is weaker evidence than presence, so scale by transcript length:
