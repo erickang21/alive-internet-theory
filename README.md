@@ -8,20 +8,19 @@ Chrome extension that overlays on YouTube videos and Shorts and rates them **Lik
 frontend/            Chrome extension (Manifest V3, esbuild)
 backend/api/         Flask API: GET /video/evaluation, POST /video/evaluation, POST /video/community-vote
 backend/scoring/     Scoring engine (starts at 100, deducts per AI evidence)
-backend/database/    MongoDB Atlas repositories (videos, channel cache, community votes)
+backend/database/    SQLAlchemy models + repositories on SQLite, Alembic migrations
 ```
 
 ## Runbook
 
 ### 1. Install (first time)
 
-Prerequisites: Python 3.11+, Node.js 20+, Chrome, and accounts for the three external services below.
+Prerequisites: Python 3.11+ (or Docker), Node.js 20+, Chrome, and keys for the two external services below.
 
 **Gather credentials:**
 
-1. **MongoDB Atlas** — create a free cluster at [cloud.mongodb.com](https://cloud.mongodb.com), add a database user, allow your IP under Network Access, then copy the connection string from Database → Connect → Drivers. Collections and indexes are created automatically on first use.
-2. **GPTZero** — get an API key (hackathon form) for `api.gptzero.me`.
-3. **YouTube Data API v3** — in [console.cloud.google.com](https://console.cloud.google.com), create a project, enable "YouTube Data API v3", and create an API key (no OAuth needed for public reads).
+1. **GPTZero** — get an API key (hackathon form) for `api.gptzero.me`.
+2. **YouTube Data API v3** — in [console.cloud.google.com](https://console.cloud.google.com), create a project, enable "YouTube Data API v3", and create an API key (no OAuth needed for public reads).
 
 **Backend:**
 
@@ -32,7 +31,7 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Edit `backend/.env` and fill in `GPTZERO_API_KEY`, `YOUTUBE_API_KEY`, `MONGODB_URI`, `MONGODB_USERNAME`, and `MONGODB_PASSWORD` with the values gathered above. Never commit `.env` — it is gitignored.
+Edit `backend/.env` and fill in `GPTZERO_API_KEY` and `YOUTUBE_API_KEY` with the values gathered above. Never commit `.env` — it is gitignored. No database setup is needed: the backend creates the SQLite file (`backend/data/alive_internet_theory.db`) and applies any pending migrations every time it starts.
 
 **Frontend:**
 
@@ -59,11 +58,31 @@ python -m backend.api.app
 
 The API listens on `http://127.0.0.1:5000`; check it with `curl http://127.0.0.1:5000/health`.
 
-**Use the extension:** open any YouTube watch or Shorts page. The overlay appears in the top right, shows "Analyzing…" while the transcript is fetched and scored, then displays the verdict with an expandable per-criterion breakdown. Evaluations are cached in Atlas, so revisiting a video is instant.
+**Or start the backend with Docker Compose** (from the repo root; only `backend/.env` is needed, not the venv):
 
-**After changing frontend code:** rebuild with `npm run build` (or leave `npm run watch` running), then click the reload icon on the extension card in `chrome://extensions` and refresh the YouTube tab. Backend code changes only need the Flask process restarted (or set `FLASK_DEBUG=1` in `backend/.env` for auto-reload).
+```bash
+docker compose up --build      # add -d to run in the background
+docker compose down            # stop
+```
+
+It serves the same `http://127.0.0.1:5000`. The SQLite database lives in the `backend-data` Docker volume, so it survives restarts but is separate from the file a venv run uses.
+
+**Use the extension:** open any YouTube watch or Shorts page. The overlay appears in the top right, shows "Analyzing…" while the transcript is fetched and scored, then displays the verdict with an expandable per-criterion breakdown. Evaluations are cached in the SQLite database, so revisiting a video is instant.
+
+**After changing frontend code:** rebuild with `npm run build` (or leave `npm run watch` running), then click the reload icon on the extension card in `chrome://extensions` and refresh the YouTube tab. Backend code changes only need the Flask process restarted (or set `FLASK_DEBUG=1` in `backend/.env` for auto-reload); under Docker, rerun `docker compose up --build`.
 
 ## Development
 
 - Backend lint/format: `ruff check backend && ruff format backend` ([ruff](https://docs.astral.sh/ruff/))
 - Frontend lint/format: `npm run lint` and `npm run format` in `frontend/`
+
+### Changing the database schema
+
+Tables are defined as SQLAlchemy models in `backend/database/models.py`; [Alembic](https://alembic.sqlalchemy.org) migrations in `backend/database/migrations/versions/` evolve existing databases to match. After editing a model:
+
+```bash
+alembic -c backend/alembic.ini revision --autogenerate -m "add foo column to videos"
+ruff check --fix backend && ruff format backend
+```
+
+Review the generated file (autogenerate misses some changes, e.g. column renames show up as drop + add), then commit it with the model change. Every backend start — venv or Docker — runs `alembic upgrade head`, so teammates and the container pick it up automatically. `alembic -c backend/alembic.ini check` reports whether models and migrations are out of sync.

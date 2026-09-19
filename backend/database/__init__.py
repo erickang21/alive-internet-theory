@@ -2,12 +2,12 @@ from backend.database.client import (
     ChannelCacheRepository,
     CommunityVoteRepository,
     EvaluationRepository,
-    get_database,
+    run_migrations,
 )
 
 __all__ = [
     "ChannelCacheRepository",
     "CommunityVoteRepository",
     "EvaluationRepository",
-    "get_database",
+    "run_migrations",
 ]

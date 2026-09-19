@@ -1,103 +1,143 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
-from pymongo import ASCENDING, MongoClient
-from pymongo.database import Database
+from alembic import command
+from alembic.config import Config as AlembicConfig
+from sqlalchemy import Engine, create_engine, event, func, select
+from sqlalchemy.dialects.sqlite import insert
+from sqlalchemy.orm import Session
 
 from backend.config import config
+from backend.database.models import Channel, CommunityVote, Video
 
-CHANNEL_CACHE_TTL_SECONDS = 24 * 60 * 60
+CHANNEL_CACHE_TTL = timedelta(hours=24)
+ALEMBIC_INI = Path(__file__).parents[1] / "alembic.ini"
 
 
 @lru_cache(maxsize=1)
-def get_client() -> MongoClient:
-    # Credentials go in as kwargs rather than spliced into the URI so special
-    # characters in the password never need URL-encoding.
-    auth: dict[str, str] = {}
-    if config.mongodb_username:
-        auth = {"username": config.mongodb_username, "password": config.mongodb_password}
-    return MongoClient(config.mongodb_uri, **auth)
+def get_engine() -> Engine:
+    path = Path(config.sqlite_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    engine = create_engine(f"sqlite:///{path}")
+    event.listen(engine, "connect", _enable_wal)
+    return engine
 
 
-def get_database() -> Database:
-    db = get_client()[config.mongodb_db_name]
-    _ensure_indexes(db)
-    return db
+def _enable_wal(dbapi_connection, _connection_record) -> None:
+    # WAL lets readers proceed while another request is writing.
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.close()
 
 
-_indexes_ensured = False
-
-
-def _ensure_indexes(db: Database) -> None:
-    global _indexes_ensured
-    if _indexes_ensured:
-        return
-    db.videos.create_index([("video_id", ASCENDING)], unique=True)
-    db.videos.create_index([("channel_id", ASCENDING)])
-    db.channels.create_index([("channel_id", ASCENDING)], unique=True)
-    # TTL index lets Atlas expire cached channel data instead of us checking staleness.
-    db.channels.create_index(
-        [("cached_at", ASCENDING)], expireAfterSeconds=CHANNEL_CACHE_TTL_SECONDS
-    )
-    db.community_votes.create_index([("video_id", ASCENDING), ("voter_id", ASCENDING)], unique=True)
-    _indexes_ensured = True
+def run_migrations() -> None:
+    alembic_config = AlembicConfig(ALEMBIC_INI)
+    # Keep alembic.ini's logging setup from replacing the app's (see env.py).
+    alembic_config.attributes["configure_logger"] = False
+    command.upgrade(alembic_config, "head")
 
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
-class EvaluationRepository:
-    def __init__(self, db: Database | None = None) -> None:
-        self._collection = (db or get_database()).videos
+def _isoformat(value: datetime) -> str:
+    # SQLite hands datetimes back without tzinfo; everything we store is UTC.
+    return value.replace(tzinfo=UTC).isoformat()
 
+
+# Upserts use INSERT … ON CONFLICT rather than get-then-add so two concurrent
+# requests for the same key (e.g. a double-clicked vote) can't both insert.
+
+
+class EvaluationRepository:
     def find_by_video_id(self, video_id: str) -> dict[str, Any] | None:
-        return self._collection.find_one({"video_id": video_id}, {"_id": 0})
+        with Session(get_engine()) as session:
+            video = session.get(Video, video_id)
+            return self._to_dict(video) if video else None
 
     def find_by_channel_id(self, channel_id: str, limit: int = 50) -> list[dict[str, Any]]:
-        cursor = self._collection.find({"channel_id": channel_id}, {"_id": 0}).limit(limit)
-        return list(cursor)
+        query = select(Video).where(Video.channel_id == channel_id).limit(limit)
+        with Session(get_engine()) as session:
+            return [self._to_dict(video) for video in session.scalars(query)]
 
     def upsert(self, evaluation: dict[str, Any]) -> dict[str, Any]:
-        evaluation["updated_at"] = _utcnow()
-        self._collection.update_one(
-            {"video_id": evaluation["video_id"]},
-            {"$set": evaluation, "$setOnInsert": {"created_at": _utcnow()}},
-            upsert=True,
+        now = _utcnow()
+        stmt = insert(Video).values(
+            video_id=evaluation["video_id"],
+            channel_id=evaluation.get("channel_id"),
+            data=evaluation,
+            created_at=now,
+            updated_at=now,
         )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[Video.video_id],
+            set_={
+                "channel_id": stmt.excluded.channel_id,
+                "data": stmt.excluded.data,
+                "updated_at": stmt.excluded.updated_at,
+            },
+        )
+        with Session(get_engine()) as session, session.begin():
+            session.execute(stmt)
+        evaluation["updated_at"] = now.isoformat()
         return evaluation
+
+    @staticmethod
+    def _to_dict(video: Video) -> dict[str, Any]:
+        return {
+            **video.data,
+            "created_at": _isoformat(video.created_at),
+            "updated_at": _isoformat(video.updated_at),
+        }
 
 
 class ChannelCacheRepository:
-    def __init__(self, db: Database | None = None) -> None:
-        self._collection = (db or get_database()).channels
-
     def find_by_channel_id(self, channel_id: str) -> dict[str, Any] | None:
-        return self._collection.find_one({"channel_id": channel_id}, {"_id": 0})
+        # SQLite has no TTL indexes, so rows past the TTL count as a miss and get
+        # overwritten by the next upsert.
+        query = select(Channel).where(
+            Channel.channel_id == channel_id,
+            Channel.cached_at >= _utcnow() - CHANNEL_CACHE_TTL,
+        )
+        with Session(get_engine()) as session:
+            channel = session.scalar(query)
+            if channel is None:
+                return None
+            return {**channel.data, "cached_at": _isoformat(channel.cached_at)}
 
     def upsert(self, channel: dict[str, Any]) -> dict[str, Any]:
-        channel["cached_at"] = _utcnow()
-        self._collection.update_one(
-            {"channel_id": channel["channel_id"]}, {"$set": channel}, upsert=True
+        now = _utcnow()
+        stmt = insert(Channel).values(channel_id=channel["channel_id"], data=channel, cached_at=now)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[Channel.channel_id],
+            set_={"data": stmt.excluded.data, "cached_at": stmt.excluded.cached_at},
         )
+        with Session(get_engine()) as session, session.begin():
+            session.execute(stmt)
+        channel["cached_at"] = now.isoformat()
         return channel
 
 
 class CommunityVoteRepository:
-    def __init__(self, db: Database | None = None) -> None:
-        self._collection = (db or get_database()).community_votes
-
     def record_vote(self, video_id: str, voter_id: str, vote: str) -> None:
-        self._collection.update_one(
-            {"video_id": video_id, "voter_id": voter_id},
-            {"$set": {"vote": vote, "voted_at": _utcnow()}},
-            upsert=True,
+        stmt = insert(CommunityVote).values(
+            video_id=video_id, voter_id=voter_id, vote=vote, voted_at=_utcnow()
         )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[CommunityVote.video_id, CommunityVote.voter_id],
+            set_={"vote": stmt.excluded.vote, "voted_at": stmt.excluded.voted_at},
+        )
+        with Session(get_engine()) as session, session.begin():
+            session.execute(stmt)
 
     def tally(self, video_id: str) -> dict[str, int]:
-        pipeline = [
-            {"$match": {"video_id": video_id}},
-            {"$group": {"_id": "$vote", "count": {"$sum": 1}}},
-        ]
-        return {row["_id"]: row["count"] for row in self._collection.aggregate(pipeline)}
+        query = (
+            select(CommunityVote.vote, func.count())
+            .where(CommunityVote.video_id == video_id)
+            .group_by(CommunityVote.vote)
+        )
+        with Session(get_engine()) as session:
+            return dict(session.execute(query).tuples().all())

@@ -5,10 +5,12 @@ from flask_cors import CORS
 
 from backend.api.routes import api
 from backend.config import config
+from backend.database import run_migrations
 
 
 def create_app() -> Flask:
     logging.basicConfig(level=logging.INFO)
+    run_migrations()
     app = Flask(__name__)
     # The extension calls us from youtube.com pages and its own service worker.
     CORS(app, origins=["https://www.youtube.com", "chrome-extension://*"])
@@ -17,7 +19,7 @@ def create_app() -> Flask:
 
 
 def main() -> None:
-    create_app().run(host="127.0.0.1", port=config.port, debug=config.flask_debug)
+    create_app().run(host=config.host, port=config.port, debug=config.flask_debug)
 
 
 if __name__ == "__main__":
