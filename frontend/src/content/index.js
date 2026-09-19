@@ -3,9 +3,12 @@ import {
   removeOverlay,
   renderError,
   renderEvaluation,
+  renderIndexing,
+  renderIndexingFailed,
   renderLoading,
-  renderNotAnalyzed,
 } from "./overlay.js";
+
+const POLL_INTERVAL_MS = 5000;
 
 let currentVideoId = null;
 
@@ -27,23 +30,44 @@ async function showCurrentVideo() {
   currentVideoId = videoId;
 
   renderLoading();
+  let indexingShown = false;
   try {
-    const response = await chrome.runtime.sendMessage({
-      type: MESSAGE_TYPES.GET_EVALUATION,
-      videoId,
-    });
+    while (videoId === currentVideoId) {
+      const response = await chrome.runtime.sendMessage({
+        type: MESSAGE_TYPES.REQUEST_EVALUATION,
+        videoId,
+      });
 
-    if (videoId !== currentVideoId) return;
-    if (!response?.ok) {
-      throw new Error(response?.error ?? "no response from service worker");
+      if (videoId !== currentVideoId) return;
+      if (!response?.ok) {
+        throw new Error(response?.error ?? "no response from service worker");
+      }
+
+      const result = response.result;
+      if (result.status === "indexing") {
+        if (!indexingShown) {
+          renderIndexing();
+          indexingShown = true;
+        }
+        await sleep(POLL_INTERVAL_MS);
+        continue;
+      }
+      if (result.status === "failed") {
+        renderIndexingFailed(result.detail);
+      } else {
+        renderEvaluation(result);
+      }
+      return;
     }
-    if (response.evaluation) renderEvaluation(response.evaluation);
-    else renderNotAnalyzed();
   } catch (error) {
     if (videoId !== currentVideoId) return;
     console.warn("[alive-internet-theory]", error);
     renderError("Couldn't reach the backend. Is it running?");
   }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // YouTube is an SPA: yt-navigate-finish fires on every in-app navigation,

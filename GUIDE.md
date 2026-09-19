@@ -1,6 +1,6 @@
 # Quick Start & Usage Guide
 
-The extension doesn't analyze anything itself. Devs run the analyze script on the videos they choose, it stores the results, and the extension shows them. All commands run from the repo root.
+Opening a video with the extension loaded indexes it automatically: the overlay says "Please wait, indexing video..." on the first visit and swaps in the verdict once the backend finishes. The analyze script still exists for batch runs and re-analysis. All commands run from the repo root.
 
 ## Quick start (Docker)
 
@@ -24,16 +24,11 @@ You need Docker, Node.js 20+, and Chrome.
    ```
    In Chrome, open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked**, and pick the `frontend/` folder.
 
-4. **Analyze a video.**
-   ```bash
-   docker compose exec backend python -m backend.analyze "https://www.youtube.com/shorts/R6yNUnRXZ64"
-   ```
+4. **Open a video in Chrome.** The overlay in the top right shows "Please wait, indexing video..." while the backend analyzes it, then updates to the verdict on its own. First visits can be slow (see "What happens per video").
 
-5. **Open that Short in Chrome.** The overlay in the top right shows its verdict.
+## Analyzing videos in batches
 
-## Analyzing videos
-
-With the stack running, submit videos to the running container:
+Opening a video indexes it by itself, so the script is for the rest: channels, playlists, files of targets, and `--force` re-analysis. With the stack running, submit videos to the running container:
 
 ```bash
 docker compose exec backend python -m backend.analyze <target> [<target> …] [--limit N] [--force]
@@ -91,7 +86,8 @@ The script exits non-zero if any video failed, and logs why.
 On any watch or Shorts page, the overlay shows one of:
 
 - **Likely human / Possibly AI / AI Slop** with `Score: N / 100`. Scores start at 100: 75 and up is Likely human, 45 to under 75 is Possibly AI, and below 45 is AI Slop. **Show breakdown** lists each criterion's deduction, or `n/a` with the reason when a criterion didn't apply.
-- **Not analyzed:** nobody has run the analyze script on this video yet.
+- **"Please wait, indexing video..."** First visit to this video: the backend is analyzing it, and the overlay swaps in the verdict by itself when it's done. You can leave and check back later; indexing keeps running.
+- **Indexing failed:** the analysis errored (details in `docker compose logs -f backend`). Failures are remembered until the backend restarts; after fixing the cause, restart it and reload the video to retry.
 - **Unavailable: "Couldn't reach the backend. Is it running?"** The API isn't answering on `127.0.0.1:5000` (see Troubleshooting).
 
 ### From the API
@@ -141,7 +137,8 @@ You can run `ant auth login` instead of putting an Anthropic key in `.env`. A ve
 | You see | Cause and fix |
 |---|---|
 | Overlay: "Couldn't reach the backend. Is it running?" | The stack is down. Run `docker compose ps`; if nothing is up, run `docker compose up -d`, then `curl http://127.0.0.1:5000/health`. |
-| Overlay: "Not analyzed" | Expected for any video you haven't run the analyze script on. |
+| Overlay stuck on "Please wait, indexing video..." | First videos are slow (channel history fetch, Whisper weights). Watch progress with `docker compose logs -f backend`. |
+| Overlay: "Indexing failed" | The analysis errored — the backend logs say why (bad key, yt-dlp break, age-restricted video). Fix the cause, restart the backend, and reload the video. |
 | `zsh: no matches found: https://…` | Put the URL in quotes. |
 | `env file …/backend/.env not found` | Create it: `cp backend/.env.example backend/.env` and add your keys. |
 | `service "backend" is not running` | `exec` needs the stack up. Run `docker compose up -d`, or use `docker compose run --rm backend …` instead. |

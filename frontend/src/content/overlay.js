@@ -17,8 +17,21 @@ export function renderError(message) {
   renderNotice("Unavailable", message);
 }
 
-export function renderNotAnalyzed() {
-  renderNotice("Not analyzed", "This video hasn't been analyzed yet.");
+export function renderIndexing() {
+  const overlay = ensureOverlay();
+  overlay.className = "ait-overlay";
+  overlay.innerHTML = `
+    <div class="ait-header">
+      <span class="ait-title">Alive Internet Theory</span>
+      <span class="ait-badge ait-verdict-loading">Indexing…</span>
+    </div>
+    <div class="ait-detail-line">Please wait, indexing video...</div>
+    <div class="ait-subtext">This may take a while. Check back later!</div>
+  `;
+}
+
+export function renderIndexingFailed(detail) {
+  renderNotice("Indexing failed", detail || "Analysis failed. See the backend logs.");
 }
 
 function renderNotice(badgeText, message) {

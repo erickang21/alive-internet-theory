@@ -2,21 +2,21 @@
 
 Chrome extension that overlays on a YouTube video/Short and rates it **Likely human / Possibly AI / AI Slop**, based on automated scoring factors.
 
-## Architecture: analysis is offline, the extension only reads
+## Architecture: analysis runs in the backend, the extension only reads
 
-**Devs decide which videos get analyzed and when.** Nothing is analyzed on page load.
+**A video is analyzed the first time someone opens it**, or when a dev runs the analyze script. The extension itself fetches no transcripts and runs no scoring.
 
-1. A dev runs the analyze script (`python -m backend.analyze <targets>`), which uses **yt-dlp for all YouTube data** (metadata, video, thumbnail, captions, channel uploads). It transcribes locally with Whisper when captions are missing, scores the video, and writes the evaluation to SQLite.
-2. The Flask API is read-only for evaluations: `GET /video/evaluation?video_id=…`. The only write left is `POST /video/community-vote`.
-3. The extension looks up the current video and shows the stored verdict, or "Not analyzed" on a 404. It fetches no transcripts and runs no scoring.
+1. The analysis pipeline (`backend/analyze.py`) uses **yt-dlp for all YouTube data** (metadata, video, thumbnail, captions, channel uploads). It transcribes locally with Whisper when captions are missing, scores the video, and writes the evaluation to SQLite. Devs run it directly (`python -m backend.analyze <targets>`) for batches, channels/playlists, and `--force` re-analysis.
+2. The extension asks the API for the current video with `POST /video/evaluation`. A stored evaluation comes back as-is; otherwise the API starts the same pipeline in a background thread (`backend/api/indexing.py`) and answers `202 {"status": "indexing"}`. Failures come back as `{"status": "failed", "detail": …}` and are held in memory only, so a backend restart clears them for a retry. `GET /video/evaluation?video_id=…` still serves stored rows without triggering anything; the other write is `POST /video/community-vote`.
+3. The extension shows "Please wait, indexing video..." while indexing and polls the POST every 5s until the verdict or a failure replaces it.
 
 ```
-frontend/                  Chrome extension (read-only overlay, top-right of YT watch/shorts pages)
+frontend/                  Chrome extension (overlay, top-right of YT watch/shorts pages; triggers indexing, shows results)
 backend/analyze.py         CLI: resolve targets → download → transcript → score → store
 backend/ytdlp.py           All YouTube access (target expansion, downloads, channel uploads + 24h cache)
 backend/transcripts.py     Caption parsing (json3/vtt), faster-whisper fallback
 backend/scoring/           Scoring engine (starts at 100, deducts per AI evidence) + per-criterion modules
-backend/api/               Flask API: GET /video/evaluation, POST /video/community-vote
+backend/api/               Flask API: GET/POST /video/evaluation, POST /video/community-vote, background indexing
 backend/database/          SQLAlchemy models + repositories on SQLite, Alembic migrations
 ```
 
