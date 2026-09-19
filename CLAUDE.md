@@ -91,7 +91,32 @@ Pattern list grows per release — **don't hardcode it**. Could power "which phr
 
 ## YouTube metadata (criteria: upload frequency, video length, account age, other videos)
 
-_TODO: pending research — endpoints, params, quota costs, and extension-side scraping fallback._
+**Decision — split the work:** the extension scrapes video-level data it already has on the page for free (`lengthSeconds`, `channelId`, `publishDate`) and POSTs it with the transcript; the backend uses the official Data API (server-side key) for channel-level data (account age, uploads list), cached per channel in our DB. This keeps the fragile scraped surface limited to what's unavoidable (transcripts).
+
+**Shorts are regular videos:** `youtube.com/shorts/<ID>` ≡ `/watch?v=<ID>`; all endpoints below work identically for Shorts.
+
+### Data API v3 (backend; API key from console.cloud.google.com, env var, no OAuth needed for public reads)
+
+Base: `https://www.googleapis.com/youtube/v3`. **Default quota 10,000 units/day** (resets midnight Pacific).
+
+| Call | Cost | Gives us |
+|---|---|---|
+| `GET /videos?part=contentDetails,snippet&id=<up to 50 IDs>` | 1 unit | `contentDetails.duration` (ISO 8601, e.g. `PT4M13S`) → **video length**; `snippet.publishedAt`, `snippet.channelId` |
+| `GET /channels?part=snippet,contentDetails&id=<CHANNEL_ID>` | 1 unit | `snippet.publishedAt` → **account age**; `contentDetails.relatedPlaylists.uploads` → uploads playlist ID (= channel ID with `UC`→`UU`) |
+| `GET /playlistItems?part=contentDetails&playlistId=<UU…>&maxResults=50` | 1 unit/page | `contentDetails.videoId` + `contentDetails.videoPublishedAt` (use this, NOT `snippet.publishedAt`) → **upload frequency** (deltas over latest 50) and **other videos for recursive scoring** |
+
+- Full per-video evaluation = **3 units** (~3,300/day); cache channel data by channel ID with ~24h TTL → ~1–2 units per new video.
+- **Avoid `search.list`** (`channelId&order=date`): 100 units/call, lagging index — only useful for server-side `publishedAfter` filtering.
+- Unofficial playlist IDs `UUSH…` (Shorts-only) / `UULF…` (long-form only) exist but are undocumented; Shorts appear in the main `UU` uploads playlist anyway (since ~2024).
+- Quota table: developers.google.com/youtube/v3/determine_quota_cost
+
+### Extension-side (free, from the page the content script already parses)
+
+`ytInitialPlayerResponse` (same global + same SPA-staleness caveat as transcript retrieval — reuse that plumbing, re-parse on `yt-navigate-finish`):
+- `videoDetails.lengthSeconds` (string, seconds), `videoDetails.channelId`, `videoDetails.author`, `viewCount`
+- `microformat.playerMicroformatRenderer.publishDate` / `.uploadDate` (ISO 8601), `.category`, `.isShortsEligible`
+
+**Not on the watch page:** channel creation date and upload history — scraping those needs extra fragile requests (`youtubei/v1/browse`, relative date strings), which is why they go through the Data API on the backend instead.
 
 ---
 
