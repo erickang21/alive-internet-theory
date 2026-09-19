@@ -1,14 +1,17 @@
+import time
 from datetime import UTC, datetime
 from functools import lru_cache
 from typing import Any
 
 from pymongo import ASCENDING, MongoClient
 from pymongo.database import Database
+from pymongo.errors import PyMongoError
 
 from backend.config import config
 
 CHANNEL_CACHE_TTL_SECONDS = 24 * 60 * 60
 SERVER_SELECTION_TIMEOUT_MS = 3000
+DB_DOWN_RETRY_SECONDS = 60
 
 
 class DatabaseUnavailableError(RuntimeError):
@@ -29,9 +32,22 @@ def get_client() -> MongoClient:
     )
 
 
+_db_down_until = 0.0
+
+
 def get_database() -> Database:
+    # Remember an unreachable server briefly so degraded mode does not pay a
+    # 3s connection timeout on every repository call.
+    global _db_down_until
+    if time.monotonic() < _db_down_until:
+        raise DatabaseUnavailableError("MongoDB unreachable; backing off before retrying")
+
     db = get_client()[config.mongodb_db_name]
-    _ensure_indexes(db)
+    try:
+        _ensure_indexes(db)
+    except PyMongoError as exc:
+        _db_down_until = time.monotonic() + DB_DOWN_RETRY_SECONDS
+        raise DatabaseUnavailableError(str(exc)) from exc
     return db
 
 

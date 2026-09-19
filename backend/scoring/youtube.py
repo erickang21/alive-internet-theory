@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import UTC, datetime
 from statistics import median
 from typing import Any
@@ -62,6 +63,21 @@ def fetch_channel(channel_id: str) -> dict[str, Any]:
         for entry in playlist.get("items", [])
     ]
 
+    # Shorts share the channel's uploads playlist, so cadence needs per-video
+    # durations to avoid flagging humans who post daily Shorts plus weekly
+    # long-form videos. One videos.list call covers all 50 IDs (1 quota unit).
+    if uploads:
+        videos = _get(
+            "videos",
+            {"part": "contentDetails", "id": ",".join(u["video_id"] for u in uploads)},
+        )
+        durations = {
+            item["id"]: _parse_duration_seconds(item["contentDetails"].get("duration"))
+            for item in videos.get("items", [])
+        }
+        for upload in uploads:
+            upload["length_seconds"] = durations.get(upload["video_id"])
+
     channel = {
         "channel_id": channel_id,
         "created_at": item["snippet"]["publishedAt"],
@@ -76,6 +92,17 @@ def fetch_channel(channel_id: str) -> dict[str, Any]:
     return channel
 
 
+_DURATION_PATTERN = re.compile(r"^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$")
+
+
+def _parse_duration_seconds(value: str | None) -> int | None:
+    match = _DURATION_PATTERN.match(value or "")
+    if not match:
+        return None
+    days, hours, minutes, seconds = (int(group or 0) for group in match.groups())
+    return days * 86400 + hours * 3600 + minutes * 60 + seconds
+
+
 def _parse_iso(value: str) -> datetime:
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
@@ -83,13 +110,21 @@ def _parse_iso(value: str) -> datetime:
 
 def score_upload_pattern(channel: dict[str, Any], video_length_seconds: int) -> dict[str, Any]:
     uploads = channel.get("recent_uploads", [])
-    timestamps = sorted(_parse_iso(u["published_at"]) for u in uploads if u["published_at"])
+    # Only long-form uploads count toward the cadence: daily Shorts are normal
+    # human output. Uploads with unknown duration (cache entries predating the
+    # duration fetch) pass through until the 24h channel cache refreshes.
+    long_form = [
+        u
+        for u in uploads
+        if u.get("length_seconds") is None or u["length_seconds"] > SHORT_VIDEO_SECONDS
+    ]
+    timestamps = sorted(_parse_iso(u["published_at"]) for u in long_form if u["published_at"])
     if len(timestamps) < 5:
         return {
             "criterion": "upload_pattern",
             "deduction": 0,
             "applied": False,
-            "detail": "Too few uploads to judge posting cadence.",
+            "detail": "Too few long-form uploads to judge posting cadence.",
         }
 
     gaps_hours = [
@@ -108,7 +143,8 @@ def score_upload_pattern(channel: dict[str, Any], video_length_seconds: int) -> 
         "deduction": deduction,
         "applied": True,
         "detail": (
-            f"Median gap between uploads: {median_gap:.1f}h over last {len(timestamps)} videos."
+            f"Median gap between long-form uploads: {median_gap:.1f}h "
+            f"over last {len(timestamps)} videos."
         ),
         "evidence": {"median_gap_hours": round(median_gap, 1), "uploads_sampled": len(timestamps)},
     }

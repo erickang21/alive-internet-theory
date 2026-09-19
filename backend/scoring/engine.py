@@ -1,6 +1,7 @@
 import logging
 from typing import Any
 
+from backend.database import DatabaseUnavailableError
 from backend.scoring import channel_history, fillers, gptzero, youtube
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,9 @@ def _safe(criterion_name: str, fn, *args) -> dict[str, Any]:
     # that criterion, not fail the whole evaluation.
     try:
         return fn(*args)
+    except DatabaseUnavailableError:
+        logger.warning("criterion %s skipped: database unavailable", criterion_name)
+        return _unavailable(criterion_name, "Criterion unavailable (database unreachable).")
     except Exception:
         logger.exception("criterion %s failed", criterion_name)
         return _unavailable(criterion_name, "Criterion unavailable (upstream error).")
@@ -70,12 +74,12 @@ def evaluate_video(
             for name in ("upload_pattern", "account_age", "channel_history")
         )
 
-    score = max(0.0, STARTING_SCORE - sum(item["deduction"] for item in breakdown))
+    score = round(max(0.0, STARTING_SCORE - sum(item["deduction"] for item in breakdown)), 1)
 
     return {
         "video_id": video_id,
         "channel_id": channel_id,
-        "score": round(score, 1),
+        "score": score,
         "verdict": _verdict(score),
         "breakdown": breakdown,
     }

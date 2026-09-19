@@ -93,6 +93,23 @@ def test_post_requires_transcript(client):
     assert response.status_code == 400
 
 
+def test_post_rejects_non_object_transcript(client):
+    response = client.post("/video/evaluation", json={"video_id": "vid1", "transcript": "hi"})
+    assert response.status_code == 400
+
+
+def test_post_tolerates_malformed_metadata(client):
+    response = client.post(
+        "/video/evaluation",
+        json={
+            "video_id": "vid1",
+            "transcript": {"text": "hello world"},
+            "metadata": {"length_seconds": "not-a-number"},
+        },
+    )
+    assert response.status_code == 201
+
+
 def test_evaluate_once_then_serve_from_cache(client):
     first = _post_evaluation(client)
     assert first.status_code == 201

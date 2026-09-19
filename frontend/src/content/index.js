@@ -27,22 +27,33 @@ async function evaluateCurrentVideo() {
   currentVideoId = videoId;
 
   renderLoading();
+
+  let metadata;
+  let transcript;
   try {
     // The inline ytInitialPlayerResponse still describes the previous video
     // after SPA navigation, so it only counts when its video ID matches.
     const pageResponse = getPagePlayerResponse();
     const pageIsFresh = pageResponse?.videoDetails?.videoId === videoId;
     const playerResponse = pageIsFresh ? pageResponse : await fetchAndroidPlayerResponse(videoId);
-    const metadata = extractVideoMetadata(playerResponse);
-
-    const transcript = await getTranscript(videoId, playerResponse, {
+    metadata = extractVideoMetadata(playerResponse);
+    transcript = await getTranscript(videoId, playerResponse, {
       allowAndroidFallback: pageIsFresh,
     });
-    if (!transcript?.text) {
-      renderError("No captions available for this video, so it can't be analyzed.");
-      return;
-    }
+  } catch (error) {
+    if (videoId !== currentVideoId) return;
+    console.warn("[alive-internet-theory]", error);
+    renderError("Couldn't fetch this video's data from YouTube.");
+    return;
+  }
 
+  if (videoId !== currentVideoId) return;
+  if (!transcript?.text) {
+    renderError("No captions available for this video, so it can't be analyzed.");
+    return;
+  }
+
+  try {
     const response = await chrome.runtime.sendMessage({
       type: MESSAGE_TYPES.EVALUATE_VIDEO,
       payload: { video_id: videoId, transcript, metadata },

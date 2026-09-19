@@ -46,13 +46,20 @@ def get_evaluation():
 def create_evaluation():
     body = request.get_json(silent=True) or {}
     video_id = body.get("video_id")
-    transcript = body.get("transcript", {})
-    metadata = body.get("metadata", {})
+    transcript = body.get("transcript")
+    metadata = body.get("metadata")
+    transcript = transcript if isinstance(transcript, dict) else {}
+    metadata = metadata if isinstance(metadata, dict) else {}
 
     if not video_id:
         return jsonify({"error": "video_id is required"}), 400
     if not transcript.get("text"):
         return jsonify({"error": "transcript.text is required"}), 400
+
+    try:
+        length_seconds = int(metadata.get("length_seconds") or 0)
+    except (TypeError, ValueError):
+        length_seconds = 0
 
     repo = None
     existing = None
@@ -70,7 +77,7 @@ def create_evaluation():
         transcript=transcript["text"],
         track_kind=transcript.get("kind"),
         channel_id=metadata.get("channel_id"),
-        video_length_seconds=int(metadata.get("length_seconds") or 0),
+        video_length_seconds=length_seconds,
     )
     evaluation["metadata"] = {
         "length_seconds": metadata.get("length_seconds"),
