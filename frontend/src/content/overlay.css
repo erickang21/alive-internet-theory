@@ -1,0 +1,112 @@
+.ait-overlay {
+  position: fixed;
+  top: 72px;
+  right: 16px;
+  z-index: 9999;
+  width: 300px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(15, 15, 15, 0.92);
+  color: #f1f1f1;
+  font-family: "Roboto", "Segoe UI", sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(6px);
+}
+
+.ait-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ait-title {
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #aaa;
+}
+
+.ait-badge {
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.ait-verdict-human {
+  background: #1e4620;
+  color: #7ee787;
+}
+
+.ait-verdict-possibly {
+  background: #4a3a10;
+  color: #f0c674;
+}
+
+.ait-verdict-slop {
+  background: #4c1a1a;
+  color: #ff7b72;
+}
+
+.ait-verdict-loading,
+.ait-verdict-error {
+  background: #2d2d2d;
+  color: #aaa;
+}
+
+.ait-score {
+  margin-top: 8px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.ait-toggle {
+  margin-top: 8px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: #3ea6ff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ait-breakdown {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ait-criterion {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.ait-criterion-skipped {
+  opacity: 0.55;
+}
+
+.ait-deduction {
+  flex-shrink: 0;
+  min-width: 34px;
+  font-weight: 600;
+  color: #ff7b72;
+}
+
+.ait-criterion-skipped .ait-deduction {
+  color: #aaa;
+}
+
+.ait-detail-line {
+  margin-top: 6px;
+  color: #aaa;
+  font-size: 12px;
+}
