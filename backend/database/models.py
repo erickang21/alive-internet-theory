@@ -29,14 +29,14 @@ class Video(Base):
     channel_id: Mapped[str | None] = mapped_column(index=True)
     # The rest of the evaluation as the API returns it: score, verdict,
     # breakdown, metadata.
-    data: Mapped[dict[str, Any]]
+    data: Mapped[dict[str, Any]] = mapped_column()
     # Fact check results; null when the video isn't educational (thesis,
     # hallucinated) or the check couldn't run (all three).
-    is_educational: Mapped[bool | None]
-    thesis: Mapped[str | None]
-    hallucinated: Mapped[bool | None]
-    created_at: Mapped[datetime]
-    updated_at: Mapped[datetime]
+    is_educational: Mapped[bool | None] = mapped_column()
+    thesis: Mapped[str | None] = mapped_column()
+    hallucinated: Mapped[bool | None] = mapped_column()
+    created_at: Mapped[datetime] = mapped_column()
+    updated_at: Mapped[datetime] = mapped_column()
 
 
 class Channel(Base):
@@ -44,8 +44,8 @@ class Channel(Base):
 
     channel_id: Mapped[str] = mapped_column(primary_key=True)
     # Channel info from yt-dlp: title, oldest upload, recent uploads.
-    data: Mapped[dict[str, Any]]
-    cached_at: Mapped[datetime]
+    data: Mapped[dict[str, Any]] = mapped_column()
+    cached_at: Mapped[datetime] = mapped_column()
 
 
 class CommunityVote(Base):
@@ -53,5 +53,5 @@ class CommunityVote(Base):
 
     video_id: Mapped[str] = mapped_column(primary_key=True)
     voter_id: Mapped[str] = mapped_column(primary_key=True)
-    vote: Mapped[str]
-    voted_at: Mapped[datetime]
+    vote: Mapped[str] = mapped_column()
+    voted_at: Mapped[datetime] = mapped_column()

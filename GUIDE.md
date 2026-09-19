@@ -1,6 +1,6 @@
 # Quick Start & Usage Guide
 
-The extension doesn't analyze anything itself. Devs run the analyze script on the videos they choose, it stores the results, and the extension shows them. All commands run from the repo root.
+Opening a video with the extension loaded queues it for analysis in the background. The overlay just says "Not analyzed" on that first visit, and the verdict appears the next time you open the video after the backend finishes. The analyze script is for batch runs and re-analysis. All commands run from the repo root.
 
 ## Quick start (Docker)
 
@@ -24,16 +24,11 @@ You need Docker, Node.js 20+, and Chrome.
    ```
    In Chrome, open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked**, and pick the `frontend/` folder.
 
-4. **Analyze a video.**
-   ```bash
-   docker compose exec backend python -m backend.analyze "https://www.youtube.com/shorts/R6yNUnRXZ64"
-   ```
+4. **Open a video in Chrome.** The overlay in the top right says "Not analyzed" while the backend analyzes it in the background. Reopen the video once it's done (usually under a minute, longer for a new channel or when Whisper is needed) to see the verdict. You can follow progress with `docker compose logs -f backend`.
 
-5. **Open that Short in Chrome.** The overlay in the top right shows its verdict.
+## Analyzing videos in batches
 
-## Analyzing videos
-
-With the stack running, submit videos to the running container:
+Opening a video queues it by itself, so the script is for the rest: channels, playlists, files of targets, and `--force` re-analysis. With the stack running, submit videos to the running container:
 
 ```bash
 docker compose exec backend python -m backend.analyze <target> [<target> …] [--limit N] [--force]
@@ -71,16 +66,18 @@ xargs docker compose exec -T backend python -m backend.analyze < videos.txt
 
 ### What happens per video
 
-1. Downloads the video (≤720p), thumbnail, captions, and yt-dlp's full metadata (`video.info.json`).
-2. Uses the captions as the transcript. If there are none, or they're blank, it transcribes the audio locally with Whisper. A video with no captions and no detectable speech is skipped and not stored.
+1. Downloads the captions, thumbnail, and yt-dlp's full metadata (`video.info.json`), but not the video itself. That takes a few seconds.
+2. Uses **the first 5 minutes** of the captions as the transcript. If there are no captions, or they're blank, it downloads the audio track, cuts it to the first 5 minutes, and transcribes it locally with Whisper (about 80s on a CPU). A video with no captions and no detectable speech is skipped and not stored.
 3. Scores it: GPTZero, filler words, upload cadence, channel age, plus Claude's fact check (educational videos only; recorded, not scored yet).
 4. Saves the result and prints e.g. `jNQXAC9IVRw: likely_human (score 100.0)`.
 
 The script exits non-zero if any video failed, and logs why.
 
 **Expect these one-time delays:**
-- **First video from a new channel:** about 1.5 minutes for a big channel, while it pulls exact dates for the channel's latest 50 uploads and its oldest one. This is cached for 24 hours.
+- **First video from a new channel:** up to about a minute, while it pulls exact dates for the channel's latest 20 uploads and its oldest one. This is cached for 24 hours.
 - **First video without captions:** downloads about 460 MB of Whisper model weights.
+
+Each stage prints a timestamped line: the queue size, `[2/7] <id>: starting`, metadata, download progress, which transcript source was used, each criterion as it runs and its result, the channel-date fetch (`channel: 10/21 upload dates fetched`), and `[2/7] <id>: done in 45s, likely_human (score 88.2)`. The run ends with `finished: N analyzed, N skipped, N failed`.
 
 **Run it from your own machine.** YouTube blocks downloads from cloud servers.
 
@@ -90,8 +87,8 @@ The script exits non-zero if any video failed, and logs why.
 
 On any watch or Shorts page, the overlay shows one of:
 
-- **Likely human / Possibly AI / AI Slop** with `Score: N / 100`. Scores start at 100: 75 and up is Likely human, 45 to under 75 is Possibly AI, and below 45 is AI Slop. **Show breakdown** lists each criterion's deduction, or `n/a` with the reason when a criterion didn't apply.
-- **Not analyzed:** nobody has run the analyze script on this video yet.
+- **Likely human / Likely AI / AI Slop** with `Score: N / 100`. Scores start at 100: 75 and up is Likely human, 45 to under 75 is Likely AI, and below 45 is AI Slop. **Show breakdown** lists each criterion's deduction, or `n/a` with the reason when a criterion didn't apply.
+- **Not analyzed:** there's no verdict yet. Opening the video queued it in the background (if it wasn't already), so reopen it later. If it never gets a verdict, the analysis failed: check `docker compose logs -f backend`. Failures are remembered until the backend restarts.
 - **Unavailable: "Couldn't reach the backend. Is it running?"** The API isn't answering on `127.0.0.1:5000` (see Troubleshooting).
 
 ### From the API
@@ -104,7 +101,7 @@ Returns `score`, `verdict`, `breakdown`, the fact check fields (`is_educational`
 
 ### Downloaded files
 
-Docker keeps everything in the `backend-data` volume at `/data`: the database, `media/<video_id>/` (video, thumbnail, captions, `video.info.json`), and the Whisper model. To copy a video's files out:
+Docker keeps everything in the `backend-data` volume at `/data`: the database, `media/<video_id>/` (captions, thumbnail, `video.info.json`, and `audio.<ext>` for videos that needed Whisper), and the Whisper model. To copy a video's files out:
 
 ```bash
 docker compose cp backend:/data/media/jNQXAC9IVRw ./jNQXAC9IVRw
@@ -141,7 +138,7 @@ You can run `ant auth login` instead of putting an Anthropic key in `.env`. A ve
 | You see | Cause and fix |
 |---|---|
 | Overlay: "Couldn't reach the backend. Is it running?" | The stack is down. Run `docker compose ps`; if nothing is up, run `docker compose up -d`, then `curl http://127.0.0.1:5000/health`. |
-| Overlay: "Not analyzed" | Expected for any video you haven't run the analyze script on. |
+| Overlay still says "Not analyzed" after a while | Either it's still running (a new channel's upload dates, Whisper) or it failed. `docker compose logs -f backend` shows which, and why (yt-dlp break, age-restricted video). A failed video isn't retried until the backend restarts: fix the cause, run `docker compose restart backend`, and reopen the video. |
 | `zsh: no matches found: https://…` | Put the URL in quotes. |
 | `env file …/backend/.env not found` | Create it: `cp backend/.env.example backend/.env` and add your keys. |
 | `service "backend" is not running` | `exec` needs the stack up. Run `docker compose up -d`, or use `docker compose run --rm backend …` instead. |

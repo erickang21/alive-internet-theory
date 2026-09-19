@@ -7,12 +7,19 @@ from alembic import command
 from alembic.config import Config as AlembicConfig
 from sqlalchemy import Engine, create_engine, event, func, select
 from sqlalchemy.dialects.sqlite import insert
+from sqlalchemy.engine.interfaces import DBAPIConnection
 from sqlalchemy.orm import Session
+from sqlalchemy.pool import ConnectionPoolEntry
 
 from backend.config import config
 from backend.database.models import Channel, CommunityVote, Video
 
 CHANNEL_CACHE_TTL = timedelta(hours=24)
+# Bump whenever the cached channel payload changes shape: rows written by older
+# code count as a miss and get refetched. Version 1 rows kept 50 uploads dated
+# from the flat listing, i.e. midnight precision, which the cadence criterion
+# read as a 0.0h median gap between same-day uploads.
+CHANNEL_CACHE_VERSION = 2
 # Evaluation keys stored as their own `videos` columns rather than inside `data`.
 VIDEO_COLUMNS = ("is_educational", "thesis", "hallucinated")
 ALEMBIC_INI = Path(__file__).parents[1] / "alembic.ini"
@@ -27,7 +34,7 @@ def get_engine() -> Engine:
     return engine
 
 
-def _enable_wal(dbapi_connection, _connection_record) -> None:
+def _enable_wal(dbapi_connection: DBAPIConnection, _connection_record: ConnectionPoolEntry) -> None:
     # WAL lets readers proceed while another request is writing.
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA journal_mode=WAL")
@@ -60,8 +67,12 @@ class EvaluationRepository:
             video = session.get(Video, video_id)
             return self._to_dict(video) if video else None
 
-    def find_by_channel_id(self, channel_id: str, limit: int = 50) -> list[dict[str, Any]]:
+    def find_by_channel_id(
+        self, channel_id: str, exclude_video_id: str | None = None, limit: int = 50
+    ) -> list[dict[str, Any]]:
         query = select(Video).where(Video.channel_id == channel_id).limit(limit)
+        if exclude_video_id:
+            query = query.where(Video.video_id != exclude_video_id)
         with Session(get_engine()) as session:
             return [self._to_dict(video) for video in session.scalars(query)]
 
@@ -83,7 +94,7 @@ class EvaluationRepository:
             },
         )
         with Session(get_engine()) as session, session.begin():
-            session.execute(stmt)
+            _ = session.execute(stmt)
         evaluation["updated_at"] = now.isoformat()
         return evaluation
 
@@ -104,6 +115,7 @@ class ChannelCacheRepository:
         query = select(Channel).where(
             Channel.channel_id == channel_id,
             Channel.cached_at >= _utcnow() - CHANNEL_CACHE_TTL,
+            func.json_extract(Channel.data, "$.cache_version") == CHANNEL_CACHE_VERSION,
         )
         with Session(get_engine()) as session:
             channel = session.scalar(query)
@@ -113,13 +125,14 @@ class ChannelCacheRepository:
 
     def upsert(self, channel: dict[str, Any]) -> dict[str, Any]:
         now = _utcnow()
+        channel["cache_version"] = CHANNEL_CACHE_VERSION
         stmt = insert(Channel).values(channel_id=channel["channel_id"], data=channel, cached_at=now)
         stmt = stmt.on_conflict_do_update(
             index_elements=[Channel.channel_id],
             set_={"data": stmt.excluded.data, "cached_at": stmt.excluded.cached_at},
         )
         with Session(get_engine()) as session, session.begin():
-            session.execute(stmt)
+            _ = session.execute(stmt)
         channel["cached_at"] = now.isoformat()
         return channel
 
@@ -134,7 +147,7 @@ class CommunityVoteRepository:
             set_={"vote": stmt.excluded.vote, "voted_at": stmt.excluded.voted_at},
         )
         with Session(get_engine()) as session, session.begin():
-            session.execute(stmt)
+            _ = session.execute(stmt)
 
     def tally(self, video_id: str) -> dict[str, int]:
         query = (

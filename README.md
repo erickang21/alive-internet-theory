@@ -1,13 +1,13 @@
 # Alive Internet Theory
 
-Chrome extension that overlays on YouTube videos and Shorts and rates them **Likely human / Possibly AI / AI Slop**. Devs choose which videos to analyze and run an analyze script, which pulls everything from YouTube with yt-dlp, scores it, and stores the result in SQLite. A Flask API serves those results to the extension. **New here? Start with [GUIDE.md](GUIDE.md)** (quick start and usage). See [CLAUDE.md](CLAUDE.md) for the full design reference.
+Chrome extension that overlays on YouTube videos and Shorts and rates them **Likely human / Likely AI / AI Slop**. The backend pulls everything from YouTube with yt-dlp, scores it, and stores the result in SQLite. Videos get analyzed when devs run the analyze script on them, or quietly in the background the first time someone opens them with the extension. A Flask API serves the results to the extension. **New here? Start with [GUIDE.md](GUIDE.md)** (quick start and usage). See [CLAUDE.md](CLAUDE.md) for the full design reference.
 
 ## Layout
 
 ```
-frontend/                  Chrome extension (Manifest V3, esbuild): read-only overlay
+frontend/                  Chrome extension (Manifest V3, esbuild): overlay; queues unanalyzed videos silently
 backend/analyze.py         CLI that analyzes videos and writes evaluations
-backend/ytdlp.py           yt-dlp: metadata, video, thumbnail, captions, channel uploads
+backend/ytdlp.py           yt-dlp: metadata, thumbnail, captions, audio for Whisper, channel uploads
 backend/transcripts.py     Caption parsing, local Whisper speech-to-text fallback
 backend/scoring/           Scoring engine (starts at 100, deducts per AI evidence)
 backend/api/               Flask API: GET /video/evaluation, POST /video/community-vote
@@ -53,7 +53,7 @@ npm run build
 
 ### 2. Analyze videos
 
-The extension never triggers analysis. A video shows up as "Not analyzed" until a dev runs the analyze script on it. Run it from your own machine, because YouTube bot-checks cloud IPs.
+Opening a video in the extension queues it for analysis in the background; the script is for batches, channels, playlists, and `--force` re-analysis. A video shows "Not analyzed" until one of them has finished. Run it from your own machine, because YouTube bot-checks cloud IPs.
 
 ```bash
 # Docker (from the repo root)
@@ -75,9 +75,9 @@ Targets can be mixed freely:
 Videos that already have an evaluation are skipped unless you pass `--force`. The script exits non-zero if any video failed, and logs why.
 
 For each video it:
-1. Downloads the video (≤720p), thumbnail, captions, and yt-dlp's full metadata (`video.info.json`) to `MEDIA_DIR/<video_id>/`.
-2. Uses the captions as the transcript, or transcribes the audio locally with Whisper if there are none. The first Whisper run downloads about 460 MB of model weights.
-3. Scores the video: GPTZero, filler words, upload cadence, and channel age. Claude also decides whether the video is educational and, if so, fact-checks its main thesis with web search. The first video from a channel also pulls exact dates for the channel's latest 50 uploads and its oldest one. That takes about 1.5 minutes for a big channel and is cached for 24 hours.
+1. Downloads the captions, thumbnail, and yt-dlp's full metadata (`video.info.json`) to `MEDIA_DIR/<video_id>/`. The video itself isn't downloaded.
+2. Uses the first 5 minutes of the captions as the transcript. If there are none, it downloads the audio, cuts it to the first 5 minutes, and transcribes it locally with Whisper. The first Whisper run downloads about 460 MB of model weights.
+3. Scores the video: GPTZero, filler words, upload cadence, and channel age. Claude also decides whether the video is educational and, if so, fact-checks its main thesis with web search. The first video from a channel also pulls exact dates for the channel's latest 20 uploads and its oldest one. That takes up to about a minute and is cached for 24 hours.
 
 ### 3. Run the API
 
@@ -93,7 +93,7 @@ python -m backend.api.app
 
 Both serve `http://127.0.0.1:5000`; check with `curl http://127.0.0.1:5000/health`. Docker keeps the database, downloaded media, and Whisper weights in the `backend-data` volume, which is separate from a venv run's `backend/data/`. `docker compose run` uses the same volume, so videos you analyze in Docker show up in the Docker API.
 
-**Use the extension:** open any YouTube watch or Shorts page. The overlay in the top right shows the stored verdict with an expandable per-criterion breakdown, or "Not analyzed" if nobody has run the analyze script on that video yet.
+**Use the extension:** open any YouTube watch or Shorts page. The overlay in the top right shows the stored verdict with an expandable per-criterion breakdown, or "Not analyzed" if there isn't one yet. In that case opening the video has queued it in the background, and the verdict shows up the next time you open it.
 
 **After changing frontend code:** rebuild with `npm run build` (or leave `npm run watch` running), then click the reload icon on the extension card in `chrome://extensions` and refresh the YouTube tab. Backend code changes only need the Flask process restarted (or set `FLASK_DEBUG=1` in `backend/.env` for auto-reload); under Docker, rerun `docker compose up --build`.
 
@@ -102,6 +102,7 @@ Both serve `http://127.0.0.1:5000`; check with `curl http://127.0.0.1:5000/healt
 ## Development
 
 - Backend lint/format: `ruff check backend && ruff format backend` ([ruff](https://docs.astral.sh/ruff/))
+- Backend type check: `pip install basedpyright` in the backend venv, then `basedpyright -p backend` ([basedpyright](https://docs.basedpyright.com), strict mode, configured in `backend/pyproject.toml`; it resolves imports from `backend/.venv`)
 - Frontend lint/format: `npm run lint` and `npm run format` in `frontend/`
 
 ### Changing the database schema

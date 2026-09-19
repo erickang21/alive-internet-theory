@@ -2,14 +2,12 @@ export const API_BASE_URL = "http://127.0.0.1:5000";
 
 export const VERDICTS = {
   likely_human: { label: "Likely human", className: "ait-verdict-human" },
-  possibly_ai: { label: "Possibly AI", className: "ait-verdict-possibly" },
+  likely_ai: { label: "Likely AI", className: "ait-verdict-possibly" },
   ai_slop: { label: "AI Slop", className: "ait-verdict-slop" },
 };
 
 export const MESSAGE_TYPES = {
-  GET_EVALUATION: "ait:get-evaluation",
-  SET_FILTER_STATE: "ait:set-filter-state",
-  GET_EVALUATIONS: "ait:get-evaluations",
+  REQUEST_EVALUATION: "ait:request-evaluation",
 };
 
 // Tri-state AI video filter. Cycle order for the sidebar's single-button

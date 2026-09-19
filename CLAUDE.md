@@ -1,26 +1,26 @@
 # Alive Internet Theory — Developer Reference (CLAUDE.md)
 
-Chrome extension that overlays on a YouTube video/Short and rates it **Likely human / Possibly AI / AI Slop**, based on automated scoring factors.
+Chrome extension that overlays on a YouTube video/Short and rates it **Likely human / Likely AI / AI Slop**, based on automated scoring factors.
 
-## Architecture: analysis is offline, the extension only reads
+## Architecture: analysis runs in the backend, the extension only reads
 
-**Devs decide which videos get analyzed and when.** Nothing is analyzed on page load.
+**A video is analyzed in the background the first time someone opens it**, or when a dev runs the analyze script. The extension itself fetches no transcripts and runs no scoring, and it never shows that indexing is happening.
 
-1. A dev runs the analyze script (`python -m backend.analyze <targets>`), which uses **yt-dlp for all YouTube data** (metadata, video, thumbnail, captions, channel uploads). It transcribes locally with Whisper when captions are missing, scores the video, and writes the evaluation to SQLite.
-2. The Flask API is read-only for evaluations: `GET /video/evaluation?video_id=…`. The only write left is `POST /video/community-vote`.
-3. The extension looks up the current video and shows the stored verdict, or "Not analyzed" on a 404. It fetches no transcripts and runs no scoring.
+1. The analysis pipeline (`backend/analyze.py`) uses **yt-dlp for all YouTube data** (metadata, thumbnail, captions, the audio track when Whisper needs it, channel uploads). It transcribes locally with Whisper when captions are missing, scores the video, and writes the evaluation to SQLite. Devs run it directly (`python -m backend.analyze <targets>`) for batches, channels/playlists, and `--force` re-analysis.
+2. The extension asks the API for the current video with `POST /video/evaluation`. A stored evaluation comes back with one criterion scored at read time (channel history, see below) and the score and verdict recomputed from the full breakdown; otherwise the API quietly starts the same pipeline in a background thread (`backend/api/indexing.py`) and answers `202 {"status": "indexing"}`. Failures come back as `{"status": "failed", "detail": …}` and are held in memory only, so a backend restart clears them for another attempt. There are no automatic retries; a GPTZero failure degrades that one criterion like any other. `GET /video/evaluation?video_id=…` still serves stored rows without triggering anything; the other write is `POST /video/community-vote`.
+3. The extension shows the verdict if there is one, and otherwise "Not analyzed". While a video has no evaluation (indexing, a failed analysis, or an unreachable backend) the content script repeats the request every 30s ± 2s of jitter and stops as soon as a score is on screen, so a verdict that finishes indexing appears without reopening the video. Polling lives in `frontend/src/content/index.js`, not the service worker, because MV3 unloads an idle worker after ~30s. A stored evaluation is fetched once per visit.
 
 ```
-frontend/                  Chrome extension (read-only overlay, top-right of YT watch/shorts pages)
+frontend/                  Chrome extension (overlay, top-right of YT watch/shorts pages; shows results, silently queues unanalyzed videos)
 backend/analyze.py         CLI: resolve targets → download → transcript → score → store
 backend/ytdlp.py           All YouTube access (target expansion, downloads, channel uploads + 24h cache)
 backend/transcripts.py     Caption parsing (json3/vtt), faster-whisper fallback
 backend/scoring/           Scoring engine (starts at 100, deducts per AI evidence) + per-criterion modules
-backend/api/               Flask API: GET /video/evaluation, POST /video/community-vote
+backend/api/               Flask API: GET/POST /video/evaluation, POST /video/community-vote, background indexing
 backend/database/          SQLAlchemy models + repositories on SQLite, Alembic migrations
 ```
 
-Storage: SQLite at `SQLITE_PATH` (default `backend/data/alive_internet_theory.db`), downloaded media at `MEDIA_DIR/<video_id>/` (`video.mp4` ≤720p, `video.info.json` with everything yt-dlp extracted, `thumbnail.jpg`, `subtitles.<lang>.<ext>`). In Docker both live on the `/data` volume, along with the Whisper model cache (`HF_HOME`). The schema changes through Alembic migrations, which the app and the analyze script apply on startup (see README → Changing the database schema).
+Storage: SQLite at `SQLITE_PATH` (default `backend/data/alive_internet_theory.db`), downloaded files at `MEDIA_DIR/<video_id>/` (`video.info.json` with everything yt-dlp extracted, `thumbnail.jpg`, `subtitles.<lang>.<ext>`, and `audio.<ext>` only when Whisper was needed). **Only the first 5 minutes of a video are analyzed** (`ANALYZED_SECONDS` in `backend/ytdlp.py`): captions are cut to that window and the audio is cut to it. **The video itself isn't downloaded**, because no criterion uses it; add a video download back when a video-based criterion needs one. In Docker both live on the `/data` volume, along with the Whisper model cache (`HF_HOME`). The schema changes through Alembic migrations, which the app and the analyze script apply on startup (see README → Changing the database schema).
 
 ## Scoring criteria → data source mapping
 
@@ -29,11 +29,19 @@ Storage: SQLite at `SQLITE_PATH` (default `backend/data/alive_internet_theory.db
 | GPTZero transcript scan | up to −45 | GPTZero `/v2/predict/text` (see below) |
 | Fact check (`fact_check`) | **not scored yet** (TBD) | Claude Opus 5 + web search over the transcript (see Fact check section) |
 | Stutters / filler words (absence ⇒ AI) | up to −20 | Transcript text analysis, ASR tracks only (see Filler-word section) |
-| Upload frequency + video length | up to −10 | Exact upload timestamps of the channel's latest 50 uploads via yt-dlp (see yt-dlp section) |
+| Upload frequency + video length | up to −10 | Exact upload timestamps of the channel's latest 20 uploads via yt-dlp (see yt-dlp section) |
 | Account age | up to −5 | Exact timestamp of the channel's **oldest upload** via yt-dlp, a proxy because the creation date isn't available |
-| Recursive: author's other videos' AI scores | recursive | Channel uploads list + our own DB of past evaluations (not built yet) |
+| Channel history (`channel_history`) | **+10 to −10** | Average score of the channel's other stored evaluations (see below) |
 
 ---
+
+## Channel history (`backend/scoring/channel_history.py`) — the one read-time criterion
+
+A video gains up to **+10** when the channel's other analyzed videos look human and loses up to **−10** when they look like AI. The average of their scores maps linearly onto that range, with the likely-human threshold (75) as the neutral point: an average of 100 gives +10, 75 gives 0, 50 or below gives −10. The swing scales by `min(n / 5, 1)`, so one sibling can move the score by at most ±2 and five or more move the full ±10. The newest 20 siblings by publish date count, so a channel that recently turned to AI stops coasting on its old videos.
+
+**It is scored when an evaluation is served, not when it is stored** (`engine.apply_channel_history`, called from both `/video/evaluation` routes). Everything else is frozen at analysis time, but this criterion depends on what else we have analyzed since, and freezing it would leave every channel's first video permanently without a history. Two consequences: the stored `score`/`verdict` (and the score the analyze script logs) are the pre-adjustment numbers, and stored scores are therefore free of this criterion, so a channel's reputation can't feed on itself — siblings contribute their own content and channel signals only.
+
+A bonus is stored as a negative `deduction`, like the filler-word criterion's natural-rate bonus, and the engine clamps the total to 0–100, so a video already at 100 gains nothing.
 
 ## GPTZero API (source: GPTZero API Workshop slides — authoritative for this project)
 
@@ -110,19 +118,22 @@ Auth: `ANTHROPIC_API_KEY`, or an `ant auth login` profile for venv runs (a set `
 
 ## yt-dlp: all YouTube data (`backend/ytdlp.py`)
 
-**Decision:** the YouTube Data API is gone. yt-dlp supplies video metadata, the video file, thumbnail, captions, and channel upload history, with no API key and no quota.
+**Decision:** the YouTube Data API is gone. yt-dlp supplies video metadata, thumbnail, captions, the audio track (only for Whisper), and channel upload history, with no API key and no quota.
 
-**Runtime requirements:** `yt-dlp[default]` (bundles `yt-dlp-ejs`), **ffmpeg** (YouTube serves video and audio as separate streams, so downloads need merging; also converts thumbnails to jpg), and **Deno** (yt-dlp needs a JS runtime for YouTube's player challenges). The Docker image includes both. YouTube breaks yt-dlp regularly, so the first fix to try is `pip install -U "yt-dlp[default]"` (or rebuilding the image with `--no-cache`).
+**Runtime requirements:** `yt-dlp[default]` (bundles `yt-dlp-ejs`), **ffmpeg** (converts thumbnails to jpg and cuts the audio to the analyzed window), and **Deno** (yt-dlp needs a JS runtime for YouTube's player challenges). The Docker image includes both. YouTube breaks yt-dlp regularly, so the first fix to try is `pip install -U "yt-dlp[default]"` (or rebuilding the image with `--no-cache`).
 
 **Where to run it:** YouTube bot-checks cloud IPs. Run the analyze script from a residential connection (a dev machine), not a cloud host.
+
+**Don't use `download_ranges` / `--download-sections` for partial downloads.** A ranged download is handed to ffmpeg, which fetches the stream in one long request that YouTube throttles to about playback speed. We measured 0.11 MB/s (60s of 720p video took 36s), against 6.3 MB/s for yt-dlp's own chunked downloader. To get the first N minutes, download the whole stream and cut it locally with `ffmpeg -t N -c copy`, which takes a fraction of a second (`download_audio` / `_cut`).
 
 **Video metadata** (full `extract_info` on the watch URL): `timestamp` (exact upload time, to the second; `upload_date` is the same instant as `YYYYMMDD`), `duration`, `channel_id`, `channel`, `title`, `categories`, `view_count`, and more. The full dict is saved as `video.info.json`. Shorts are regular videos (`/shorts/<ID>` ≡ `/watch?v=<ID>`).
 
 **Captions:** `automatic_captions` holds the ASR track under `<lang>-orig` (original language), plus machine translations under keys like `en-de` or `en-en`. Never use the translations. `subtitles` holds creator-uploaded tracks; livestream replays list `live_chat` there, which is excluded. We pick the tracks ourselves from `extract_info(process=False)` and pass exact escaped keys, because `subtitleslangs` entries are **case-insensitive full-match regexes** (so `en-[A-Z]{2}` also matches `en-de`). The `filepath` in `requested_subtitles` is the pre-move path, so we build paths from our own output template. We prefer ASR over uploaded captions for the transcript.
 
 **Channel data** (`fetch_channel`, cached per channel for 24h in the `channels` table):
+- The cached payload carries a `cache_version`. **Bump `CHANNEL_CACHE_VERSION`** (`backend/database/client.py`) whenever its shape changes: a mismatched row counts as a miss and is refetched, instead of being scored by newer code. Rows from before the version check held 50 uploads dated to midnight from the flat listing, which read as a 0.0h median gap between a channel's same-day uploads.
 - The uploads playlist (`UC…` → `UU…`) is listed with `extract_flat` **only for video IDs and order** (newest first). **Never use flat-entry dates.** Flat entries only have YouTube's relative dates ("3 days ago"), and even with `youtubetab:approximate_date` those came out up to 2 days wrong for recent uploads and months wrong for old ones.
-- Exact timestamps come from a **full extraction of each upload** (~1.3s each): the latest 50 for cadence (median gap), plus the oldest for account age. A big channel takes about 1.5 minutes on first fetch (86s for 1,848 uploads: a 22s listing walk plus 51 extractions). Uploads that fail to extract (members-only, age-restricted, removed) are skipped with a warning.
+- Exact timestamps come from a **full extraction of each upload** (1.3–2.4s each, measured on different days): the latest 20 (`RECENT_UPLOADS`) for cadence (median gap), plus the oldest for account age, so 21 extractions. The listing walk itself takes 9–22s for a channel with 1,848 uploads, because finding the oldest upload means reading the whole list. Uploads that fail to extract (members-only, age-restricted, removed) are skipped with a warning.
 - **No channel creation date** is available from yt-dlp, including the About tab. Account age uses the oldest upload's exact timestamp. For MKBHD that's within about a week of the real creation date, but it undercounts channels that sat empty before their first public upload.
 - A bare channel URL expands to one nested playlist per tab (Videos, Live, Shorts); `resolve_video_ids` recurses into them.
 
@@ -131,7 +142,8 @@ Auth: `ANTHROPIC_API_KEY`, or an `ant auth login` profile for venv runs (a set `
 ## Transcripts (`backend/transcripts.py`)
 
 1. Use the ASR (`<lang>-orig`) caption track if present, otherwise the creator-uploaded one (English first). Formats: json3 (join `events[].segs[].utf8`), or VTT when json3 isn't offered (strip tags, dedupe the rolling repeated lines of auto-caption VTT).
-2. **If there are no captions or they're blank**, transcribe the downloaded video locally with **faster-whisper** (`small` model, CPU int8, VAD filter). The first run downloads about 460 MB of weights to the Hugging Face cache. A transcript has `kind` `asr`, `standard`, or `whisper`.
+2. **If there are no captions or they're blank**, download the audio track (`download_audio`: ~4s for a 16-minute video's 16 MB track), cut it to the first 5 minutes, and transcribe it locally with **faster-whisper** (`small` model, CPU int8, VAD filter). That takes about 80s per 5 minutes of audio on CPU. The first run also downloads about 460 MB of weights to the Hugging Face cache. A transcript has `kind` `asr`, `standard`, or `whisper`.
+3. Every transcript covers only the first 5 minutes: json3 events and VTT cues from 5:00 on are dropped, and the audio is cut to the same window.
 
 ## Filler-word criterion notes (up to −20)
 

@@ -1,34 +1,55 @@
 import json
+import logging
 import re
+import time
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from faster_whisper import WhisperModel
+from faster_whisper import WhisperModel  # pyright: ignore[reportMissingTypeStubs]
 
-from backend.ytdlp import Download, SubtitleTrack
+from backend.ytdlp import ANALYZED_SECONDS, Download, SubtitleTrack, download_audio
+
+logger = logging.getLogger(__name__)
 
 WHISPER_MODEL = "small"
-VTT_TIMING = re.compile(r"^\d{2}:\d{2}[:.\d]* --> ")
+VTT_TIMING = re.compile(r"^(?:(\d+):)?(\d{2}):(\d{2})\.(\d{3}) --> ")
 VTT_TAG = re.compile(r"<[^>]+>")
 
 
 def get_transcript(download: Download) -> dict[str, Any]:
+    """Transcript of the first ANALYZED_SECONDS, matching the downloaded video."""
     # Prefer auto captions: they keep the fillers and stutters the filler-word
     # criterion looks for, which uploaded captions strip by convention.
     tracks = sorted(download.subtitles, key=lambda track: track.kind != "asr")
     for track in tracks:
         text = _read_subtitles(track)
+        source = "auto-generated" if track.kind == "asr" else "uploaded"
         if text:
+            logger.info(
+                "transcript: %s captions (%s), %d words", source, track.language, len(text.split())
+            )
             return {"text": text, "kind": track.kind, "language": track.language}
+        logger.info("transcript: %s captions (%s) are blank", source, track.language)
 
     # No captions, or only blank ones: transcribe the audio locally.
-    return transcribe(download.video_path)
+    logger.info("transcript: no usable captions, transcribing the audio with Whisper")
+    audio_path = download_audio(download.video_id)
+    return {**transcribe(audio_path), "audio_path": audio_path}
 
 
 def transcribe(media_path: Path) -> dict[str, Any]:
-    segments, info = _whisper().transcribe(str(media_path), vad_filter=True)
+    started = time.monotonic()
+    # transcribe() leaves some parameter types unannotated upstream.
+    segments, info = _whisper().transcribe(str(media_path), vad_filter=True)  # pyright: ignore[reportUnknownMemberType]
+    # Segments are generated lazily, so this join is where transcription happens.
     text = " ".join(segment.text.strip() for segment in segments)
+    logger.info(
+        "transcript: Whisper (%s), %d words in %.0fs",
+        info.language,
+        len(text.split()),
+        time.monotonic() - started,
+    )
     # Whisper drops most fillers, so the filler criterion treats "whisper" like
     # uploaded captions and skips itself.
     return {"text": text, "kind": "whisper", "language": info.language}
@@ -36,18 +57,24 @@ def transcribe(media_path: Path) -> dict[str, Any]:
 
 @lru_cache(maxsize=1)
 def _whisper() -> WhisperModel:
+    logger.info(
+        "transcript: loading the Whisper %s model (the first run downloads ~460 MB)",
+        WHISPER_MODEL,
+    )
     return WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
 
 
 def _read_subtitles(track: SubtitleTrack) -> str:
     raw = track.path.read_text(encoding="utf-8")
     if track.path.suffix == ".json3":
-        segments = (
-            seg.get("utf8", "")
-            for event in json.loads(raw).get("events", [])
-            for seg in event.get("segs") or []
-        )
-        text = "".join(segments)
+        events: list[dict[str, Any]] = json.loads(raw).get("events") or []
+        parts: list[str] = []
+        for event in events:
+            if event.get("tStartMs", 0) >= ANALYZED_SECONDS * 1000:
+                break
+            segs: list[dict[str, Any]] = event.get("segs") or []
+            parts += [seg.get("utf8", "") for seg in segs]
+        text = "".join(parts)
     else:
         text = _vtt_text(raw)
     return re.sub(r"\s+", " ", text).strip()
@@ -57,8 +84,12 @@ def _vtt_text(raw: str) -> str:
     lines: list[str] = []
     for block in raw.split("\n\n"):
         cue = block.strip().splitlines()
-        if not any(VTT_TIMING.match(line) for line in cue):
+        timing = next((m for line in cue if (m := VTT_TIMING.match(line))), None)
+        if timing is None:
             continue  # header, NOTE, or STYLE block
+        hours, minutes, seconds, _millis = timing.groups()
+        if int(hours or 0) * 3600 + int(minutes) * 60 + int(seconds) >= ANALYZED_SECONDS:
+            break
         for line in cue:
             if VTT_TIMING.match(line):
                 continue
