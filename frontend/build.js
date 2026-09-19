@@ -7,7 +7,6 @@ const options = {
   entryPoints: {
     content: "src/content/index.js",
     background: "src/background/index.js",
-    "main-world": "src/injected/main-world.js",
   },
   bundle: true,
   format: "iife",

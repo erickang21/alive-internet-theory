@@ -7,7 +7,5 @@ export const VERDICTS = {
 };
 
 export const MESSAGE_TYPES = {
-  EVALUATE_VIDEO: "ait:evaluate-video",
-  FETCH_PLAYER_RESPONSE: "ait:fetch-player-response",
-  PLAYER_RESPONSE_RESULT: "ait:player-response-result",
+  GET_EVALUATION: "ait:get-evaluation",
 };

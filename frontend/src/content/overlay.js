@@ -8,21 +8,30 @@ export function renderLoading() {
   overlay.innerHTML = `
     <div class="ait-header">
       <span class="ait-title">Alive Internet Theory</span>
-      <span class="ait-badge ait-verdict-loading">Analyzing…</span>
+      <span class="ait-badge ait-verdict-loading">Loading…</span>
     </div>
   `;
 }
 
 export function renderError(message) {
+  renderNotice("Unavailable", message);
+}
+
+export function renderNotAnalyzed() {
+  renderNotice("Not analyzed", "This video hasn't been analyzed yet.");
+}
+
+function renderNotice(badgeText, message) {
   const overlay = ensureOverlay();
   overlay.className = "ait-overlay";
   overlay.innerHTML = `
     <div class="ait-header">
       <span class="ait-title">Alive Internet Theory</span>
-      <span class="ait-badge ait-verdict-error">Unavailable</span>
+      <span class="ait-badge ait-verdict-error"></span>
     </div>
     <div class="ait-detail-line"></div>
   `;
+  overlay.querySelector(".ait-badge").textContent = badgeText;
   overlay.querySelector(".ait-detail-line").textContent = message;
 }
 

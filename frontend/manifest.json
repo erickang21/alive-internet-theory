@@ -15,11 +15,5 @@
       "css": ["dist/overlay.css"],
       "run_at": "document_idle"
     }
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": ["dist/main-world.js"],
-      "matches": ["https://www.youtube.com/*"]
-    }
   ]
 }
