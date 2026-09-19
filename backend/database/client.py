@@ -7,7 +7,9 @@ from alembic import command
 from alembic.config import Config as AlembicConfig
 from sqlalchemy import Engine, create_engine, event, func, select
 from sqlalchemy.dialects.sqlite import insert
+from sqlalchemy.engine.interfaces import DBAPIConnection
 from sqlalchemy.orm import Session
+from sqlalchemy.pool import ConnectionPoolEntry
 
 from backend.config import config
 from backend.database.models import Channel, CommunityVote, Video
@@ -27,7 +29,7 @@ def get_engine() -> Engine:
     return engine
 
 
-def _enable_wal(dbapi_connection, _connection_record) -> None:
+def _enable_wal(dbapi_connection: DBAPIConnection, _connection_record: ConnectionPoolEntry) -> None:
     # WAL lets readers proceed while another request is writing.
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA journal_mode=WAL")
@@ -83,7 +85,7 @@ class EvaluationRepository:
             },
         )
         with Session(get_engine()) as session, session.begin():
-            session.execute(stmt)
+            _ = session.execute(stmt)
         evaluation["updated_at"] = now.isoformat()
         return evaluation
 
@@ -119,7 +121,7 @@ class ChannelCacheRepository:
             set_={"data": stmt.excluded.data, "cached_at": stmt.excluded.cached_at},
         )
         with Session(get_engine()) as session, session.begin():
-            session.execute(stmt)
+            _ = session.execute(stmt)
         channel["cached_at"] = now.isoformat()
         return channel
 
@@ -134,7 +136,7 @@ class CommunityVoteRepository:
             set_={"vote": stmt.excluded.vote, "voted_at": stmt.excluded.voted_at},
         )
         with Session(get_engine()) as session, session.begin():
-            session.execute(stmt)
+            _ = session.execute(stmt)
 
     def tally(self, video_id: str) -> dict[str, int]:
         query = (

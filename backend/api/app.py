@@ -13,7 +13,7 @@ def create_app() -> Flask:
     run_migrations()
     app = Flask(__name__)
     # The extension calls us from youtube.com pages and its own service worker.
-    CORS(app, origins=["https://www.youtube.com", "chrome-extension://*"])
+    _ = CORS(app, origins=["https://www.youtube.com", "chrome-extension://*"])
     app.register_blueprint(api)
     return app
 

@@ -71,16 +71,18 @@ xargs docker compose exec -T backend python -m backend.analyze < videos.txt
 
 ### What happens per video
 
-1. Downloads the video (≤720p), thumbnail, captions, and yt-dlp's full metadata (`video.info.json`).
-2. Uses the captions as the transcript. If there are none, or they're blank, it transcribes the audio locally with Whisper. A video with no captions and no detectable speech is skipped and not stored.
+1. Downloads the captions, thumbnail, and yt-dlp's full metadata (`video.info.json`), but not the video itself. That takes a few seconds.
+2. Uses **the first 5 minutes** of the captions as the transcript. If there are no captions, or they're blank, it downloads the audio track, cuts it to the first 5 minutes, and transcribes it locally with Whisper (about 80s on a CPU). A video with no captions and no detectable speech is skipped and not stored.
 3. Scores it: GPTZero, filler words, upload cadence, channel age, plus Claude's fact check (educational videos only; recorded, not scored yet).
 4. Saves the result and prints e.g. `jNQXAC9IVRw: likely_human (score 100.0)`.
 
 The script exits non-zero if any video failed, and logs why.
 
 **Expect these one-time delays:**
-- **First video from a new channel:** about 1.5 minutes for a big channel, while it pulls exact dates for the channel's latest 50 uploads and its oldest one. This is cached for 24 hours.
+- **First video from a new channel:** up to about a minute, while it pulls exact dates for the channel's latest 20 uploads and its oldest one. This is cached for 24 hours.
 - **First video without captions:** downloads about 460 MB of Whisper model weights.
+
+Each stage prints a timestamped line: the queue size, `[2/7] <id>: starting`, metadata, download progress, which transcript source was used, each criterion as it runs and its result, the channel-date fetch (`channel: 10/21 upload dates fetched`), and `[2/7] <id>: done in 45s, likely_human (score 88.2)`. The run ends with `finished: N analyzed, N skipped, N failed`.
 
 **Run it from your own machine.** YouTube blocks downloads from cloud servers.
 
@@ -104,7 +106,7 @@ Returns `score`, `verdict`, `breakdown`, the fact check fields (`is_educational`
 
 ### Downloaded files
 
-Docker keeps everything in the `backend-data` volume at `/data`: the database, `media/<video_id>/` (video, thumbnail, captions, `video.info.json`), and the Whisper model. To copy a video's files out:
+Docker keeps everything in the `backend-data` volume at `/data`: the database, `media/<video_id>/` (captions, thumbnail, `video.info.json`, and `audio.<ext>` for videos that needed Whisper), and the Whisper model. To copy a video's files out:
 
 ```bash
 docker compose cp backend:/data/media/jNQXAC9IVRw ./jNQXAC9IVRw

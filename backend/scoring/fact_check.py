@@ -3,6 +3,7 @@ import logging
 from typing import Any
 
 import anthropic
+from anthropic.types.beta import BetaMessage, BetaMessageParam, BetaToolParam
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ return an empty thesis.
 {transcript}
 </transcript>"""
 
-CLASSIFY_SCHEMA = {
+CLASSIFY_SCHEMA: dict[str, object] = {
     "type": "object",
     "properties": {
         "is_educational": {"type": "boolean"},
@@ -58,7 +59,7 @@ Search the web for independent, reputable third-party sources, not the video \
 or its creator, and check whether they confirm the thesis is correct. Then \
 call report_verdict exactly once."""
 
-VERDICT_TOOL = {
+VERDICT_TOOL: BetaToolParam = {
     "name": "report_verdict",
     "description": (
         "Report whether independent third-party sources confirm the thesis. "
@@ -97,6 +98,7 @@ def score_transcript(transcript: str) -> dict[str, Any]:
     if client.api_key is None and client.auth_token is None and client.credentials is None:
         _disable("no Anthropic credentials found")
         return SKIPPED
+    logger.info("fact check: deciding whether the video is educational")
     try:
         classification = _classify(client, transcript)
     except (anthropic.AuthenticationError, anthropic.CredentialsError) as error:
@@ -112,6 +114,7 @@ def score_transcript(transcript: str) -> dict[str, Any]:
         }
 
     thesis = classification["thesis"]
+    logger.info('fact check: educational, thesis "%s"; checking it with web search', thesis)
     verdict = _verify(client, thesis)
     outcome = (
         "not confirmed by independent sources"
@@ -137,7 +140,7 @@ def _disable(reason: str) -> None:
     _credentials_unusable = True
     logger.warning(
         "Skipping the fact check for this run: %s. Set ANTHROPIC_API_KEY in backend/.env "
-        "or run `ant auth login`.",
+        + "or run `ant auth login`.",
         reason,
     )
 
@@ -157,7 +160,7 @@ def _classify(client: anthropic.Anthropic, transcript: str) -> dict[str, Any]:
 
 
 def _verify(client: anthropic.Anthropic, thesis: str) -> dict[str, Any]:
-    messages: list[dict[str, Any]] = [
+    messages: list[BetaMessageParam] = [
         {"role": "user", "content": VERIFY_PROMPT.format(thesis=thesis)}
     ]
     for _ in range(MAX_CONTINUATIONS + 1):
@@ -183,7 +186,7 @@ def _verify(client: anthropic.Anthropic, thesis: str) -> dict[str, Any]:
     raise RuntimeError("fact check still paused after the maximum number of continuations")
 
 
-def _check_stop(response: Any) -> None:
+def _check_stop(response: BetaMessage) -> None:
     if response.stop_reason == "refusal":
         category = response.stop_details.category if response.stop_details else None
         raise RuntimeError(f"model declined to fact-check (category: {category})")

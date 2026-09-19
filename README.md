@@ -7,7 +7,7 @@ Chrome extension that overlays on YouTube videos and Shorts and rates them **Lik
 ```
 frontend/                  Chrome extension (Manifest V3, esbuild): read-only overlay
 backend/analyze.py         CLI that analyzes videos and writes evaluations
-backend/ytdlp.py           yt-dlp: metadata, video, thumbnail, captions, channel uploads
+backend/ytdlp.py           yt-dlp: metadata, thumbnail, captions, audio for Whisper, channel uploads
 backend/transcripts.py     Caption parsing, local Whisper speech-to-text fallback
 backend/scoring/           Scoring engine (starts at 100, deducts per AI evidence)
 backend/api/               Flask API: GET /video/evaluation, POST /video/community-vote
@@ -75,9 +75,9 @@ Targets can be mixed freely:
 Videos that already have an evaluation are skipped unless you pass `--force`. The script exits non-zero if any video failed, and logs why.
 
 For each video it:
-1. Downloads the video (≤720p), thumbnail, captions, and yt-dlp's full metadata (`video.info.json`) to `MEDIA_DIR/<video_id>/`.
-2. Uses the captions as the transcript, or transcribes the audio locally with Whisper if there are none. The first Whisper run downloads about 460 MB of model weights.
-3. Scores the video: GPTZero, filler words, upload cadence, and channel age. Claude also decides whether the video is educational and, if so, fact-checks its main thesis with web search. The first video from a channel also pulls exact dates for the channel's latest 50 uploads and its oldest one. That takes about 1.5 minutes for a big channel and is cached for 24 hours.
+1. Downloads the captions, thumbnail, and yt-dlp's full metadata (`video.info.json`) to `MEDIA_DIR/<video_id>/`. The video itself isn't downloaded.
+2. Uses the first 5 minutes of the captions as the transcript. If there are none, it downloads the audio, cuts it to the first 5 minutes, and transcribes it locally with Whisper. The first Whisper run downloads about 460 MB of model weights.
+3. Scores the video: GPTZero, filler words, upload cadence, and channel age. Claude also decides whether the video is educational and, if so, fact-checks its main thesis with web search. The first video from a channel also pulls exact dates for the channel's latest 20 uploads and its oldest one. That takes up to about a minute and is cached for 24 hours.
 
 ### 3. Run the API
 
@@ -102,6 +102,7 @@ Both serve `http://127.0.0.1:5000`; check with `curl http://127.0.0.1:5000/healt
 ## Development
 
 - Backend lint/format: `ruff check backend && ruff format backend` ([ruff](https://docs.astral.sh/ruff/))
+- Backend type check: `pip install basedpyright` in the backend venv, then `basedpyright -p backend` ([basedpyright](https://docs.basedpyright.com), strict mode, configured in `backend/pyproject.toml`; it resolves imports from `backend/.venv`)
 - Frontend lint/format: `npm run lint` and `npm run format` in `frontend/`
 
 ### Changing the database schema

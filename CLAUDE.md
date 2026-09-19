@@ -20,7 +20,7 @@ backend/api/               Flask API: GET /video/evaluation, POST /video/communi
 backend/database/          SQLAlchemy models + repositories on SQLite, Alembic migrations
 ```
 
-Storage: SQLite at `SQLITE_PATH` (default `backend/data/alive_internet_theory.db`), downloaded media at `MEDIA_DIR/<video_id>/` (`video.mp4` ≤720p, `video.info.json` with everything yt-dlp extracted, `thumbnail.jpg`, `subtitles.<lang>.<ext>`). In Docker both live on the `/data` volume, along with the Whisper model cache (`HF_HOME`). The schema changes through Alembic migrations, which the app and the analyze script apply on startup (see README → Changing the database schema).
+Storage: SQLite at `SQLITE_PATH` (default `backend/data/alive_internet_theory.db`), downloaded files at `MEDIA_DIR/<video_id>/` (`video.info.json` with everything yt-dlp extracted, `thumbnail.jpg`, `subtitles.<lang>.<ext>`, and `audio.<ext>` only when Whisper was needed). **Only the first 5 minutes of a video are analyzed** (`ANALYZED_SECONDS` in `backend/ytdlp.py`): captions are cut to that window and the audio is cut to it. **The video itself isn't downloaded**, because no criterion uses it; add a video download back when a video-based criterion needs one. In Docker both live on the `/data` volume, along with the Whisper model cache (`HF_HOME`). The schema changes through Alembic migrations, which the app and the analyze script apply on startup (see README → Changing the database schema).
 
 ## Scoring criteria → data source mapping
 
@@ -29,7 +29,7 @@ Storage: SQLite at `SQLITE_PATH` (default `backend/data/alive_internet_theory.db
 | GPTZero transcript scan | up to −45 | GPTZero `/v2/predict/text` (see below) |
 | Fact check (`fact_check`) | **not scored yet** (TBD) | Claude Opus 5 + web search over the transcript (see Fact check section) |
 | Stutters / filler words (absence ⇒ AI) | up to −20 | Transcript text analysis, ASR tracks only (see Filler-word section) |
-| Upload frequency + video length | up to −10 | Exact upload timestamps of the channel's latest 50 uploads via yt-dlp (see yt-dlp section) |
+| Upload frequency + video length | up to −10 | Exact upload timestamps of the channel's latest 20 uploads via yt-dlp (see yt-dlp section) |
 | Account age | up to −5 | Exact timestamp of the channel's **oldest upload** via yt-dlp, a proxy because the creation date isn't available |
 | Recursive: author's other videos' AI scores | recursive | Channel uploads list + our own DB of past evaluations (not built yet) |
 
@@ -110,11 +110,13 @@ Auth: `ANTHROPIC_API_KEY`, or an `ant auth login` profile for venv runs (a set `
 
 ## yt-dlp: all YouTube data (`backend/ytdlp.py`)
 
-**Decision:** the YouTube Data API is gone. yt-dlp supplies video metadata, the video file, thumbnail, captions, and channel upload history, with no API key and no quota.
+**Decision:** the YouTube Data API is gone. yt-dlp supplies video metadata, thumbnail, captions, the audio track (only for Whisper), and channel upload history, with no API key and no quota.
 
-**Runtime requirements:** `yt-dlp[default]` (bundles `yt-dlp-ejs`), **ffmpeg** (YouTube serves video and audio as separate streams, so downloads need merging; also converts thumbnails to jpg), and **Deno** (yt-dlp needs a JS runtime for YouTube's player challenges). The Docker image includes both. YouTube breaks yt-dlp regularly, so the first fix to try is `pip install -U "yt-dlp[default]"` (or rebuilding the image with `--no-cache`).
+**Runtime requirements:** `yt-dlp[default]` (bundles `yt-dlp-ejs`), **ffmpeg** (converts thumbnails to jpg and cuts the audio to the analyzed window), and **Deno** (yt-dlp needs a JS runtime for YouTube's player challenges). The Docker image includes both. YouTube breaks yt-dlp regularly, so the first fix to try is `pip install -U "yt-dlp[default]"` (or rebuilding the image with `--no-cache`).
 
 **Where to run it:** YouTube bot-checks cloud IPs. Run the analyze script from a residential connection (a dev machine), not a cloud host.
+
+**Don't use `download_ranges` / `--download-sections` for partial downloads.** A ranged download is handed to ffmpeg, which fetches the stream in one long request that YouTube throttles to about playback speed. We measured 0.11 MB/s (60s of 720p video took 36s), against 6.3 MB/s for yt-dlp's own chunked downloader. To get the first N minutes, download the whole stream and cut it locally with `ffmpeg -t N -c copy`, which takes a fraction of a second (`download_audio` / `_cut`).
 
 **Video metadata** (full `extract_info` on the watch URL): `timestamp` (exact upload time, to the second; `upload_date` is the same instant as `YYYYMMDD`), `duration`, `channel_id`, `channel`, `title`, `categories`, `view_count`, and more. The full dict is saved as `video.info.json`. Shorts are regular videos (`/shorts/<ID>` ≡ `/watch?v=<ID>`).
 
@@ -122,7 +124,7 @@ Auth: `ANTHROPIC_API_KEY`, or an `ant auth login` profile for venv runs (a set `
 
 **Channel data** (`fetch_channel`, cached per channel for 24h in the `channels` table):
 - The uploads playlist (`UC…` → `UU…`) is listed with `extract_flat` **only for video IDs and order** (newest first). **Never use flat-entry dates.** Flat entries only have YouTube's relative dates ("3 days ago"), and even with `youtubetab:approximate_date` those came out up to 2 days wrong for recent uploads and months wrong for old ones.
-- Exact timestamps come from a **full extraction of each upload** (~1.3s each): the latest 50 for cadence (median gap), plus the oldest for account age. A big channel takes about 1.5 minutes on first fetch (86s for 1,848 uploads: a 22s listing walk plus 51 extractions). Uploads that fail to extract (members-only, age-restricted, removed) are skipped with a warning.
+- Exact timestamps come from a **full extraction of each upload** (1.3–2.4s each, measured on different days): the latest 20 (`RECENT_UPLOADS`) for cadence (median gap), plus the oldest for account age, so 21 extractions. The listing walk itself takes 9–22s for a channel with 1,848 uploads, because finding the oldest upload means reading the whole list. Uploads that fail to extract (members-only, age-restricted, removed) are skipped with a warning.
 - **No channel creation date** is available from yt-dlp, including the About tab. Account age uses the oldest upload's exact timestamp. For MKBHD that's within about a week of the real creation date, but it undercounts channels that sat empty before their first public upload.
 - A bare channel URL expands to one nested playlist per tab (Videos, Live, Shorts); `resolve_video_ids` recurses into them.
 
@@ -131,7 +133,8 @@ Auth: `ANTHROPIC_API_KEY`, or an `ant auth login` profile for venv runs (a set `
 ## Transcripts (`backend/transcripts.py`)
 
 1. Use the ASR (`<lang>-orig`) caption track if present, otherwise the creator-uploaded one (English first). Formats: json3 (join `events[].segs[].utf8`), or VTT when json3 isn't offered (strip tags, dedupe the rolling repeated lines of auto-caption VTT).
-2. **If there are no captions or they're blank**, transcribe the downloaded video locally with **faster-whisper** (`small` model, CPU int8, VAD filter). The first run downloads about 460 MB of weights to the Hugging Face cache. A transcript has `kind` `asr`, `standard`, or `whisper`.
+2. **If there are no captions or they're blank**, download the audio track (`download_audio`: ~4s for a 16-minute video's 16 MB track), cut it to the first 5 minutes, and transcribe it locally with **faster-whisper** (`small` model, CPU int8, VAD filter). That takes about 80s per 5 minutes of audio on CPU. The first run also downloads about 460 MB of weights to the Hugging Face cache. A transcript has `kind` `asr`, `standard`, or `whisper`.
+3. Every transcript covers only the first 5 minutes: json3 events and VTT cues from 5:00 on are dropped, and the audio is cut to the same window.
 
 ## Filler-word criterion notes (up to −20)
 
