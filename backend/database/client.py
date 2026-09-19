@@ -15,6 +15,11 @@ from backend.config import config
 from backend.database.models import Channel, CommunityVote, Video
 
 CHANNEL_CACHE_TTL = timedelta(hours=24)
+# Bump whenever the cached channel payload changes shape: rows written by older
+# code count as a miss and get refetched. Version 1 rows kept 50 uploads dated
+# from the flat listing, i.e. midnight precision, which the cadence criterion
+# read as a 0.0h median gap between same-day uploads.
+CHANNEL_CACHE_VERSION = 2
 # Evaluation keys stored as their own `videos` columns rather than inside `data`.
 VIDEO_COLUMNS = ("is_educational", "thesis", "hallucinated")
 ALEMBIC_INI = Path(__file__).parents[1] / "alembic.ini"
@@ -110,6 +115,7 @@ class ChannelCacheRepository:
         query = select(Channel).where(
             Channel.channel_id == channel_id,
             Channel.cached_at >= _utcnow() - CHANNEL_CACHE_TTL,
+            func.json_extract(Channel.data, "$.cache_version") == CHANNEL_CACHE_VERSION,
         )
         with Session(get_engine()) as session:
             channel = session.scalar(query)
@@ -119,6 +125,7 @@ class ChannelCacheRepository:
 
     def upsert(self, channel: dict[str, Any]) -> dict[str, Any]:
         now = _utcnow()
+        channel["cache_version"] = CHANNEL_CACHE_VERSION
         stmt = insert(Channel).values(channel_id=channel["channel_id"], data=channel, cached_at=now)
         stmt = stmt.on_conflict_do_update(
             index_elements=[Channel.channel_id],
