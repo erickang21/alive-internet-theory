@@ -7,5 +7,5 @@ export const VERDICTS = {
 };
 
 export const MESSAGE_TYPES = {
-  GET_EVALUATION: "ait:get-evaluation",
+  REQUEST_EVALUATION: "ait:request-evaluation",
 };
