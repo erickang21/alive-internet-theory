@@ -1,4 +1,4 @@
-import { VERDICTS } from "../shared/constants.js";
+import { MAX_INDEXING_RETRIES, VERDICTS } from "../shared/constants.js";
 
 const OVERLAY_ID = "ait-overlay";
 
@@ -17,7 +17,7 @@ export function renderError(message) {
   renderNotice("Unavailable", message);
 }
 
-export function renderIndexing() {
+export function renderIndexing(retryCount = 0) {
   const overlay = ensureOverlay();
   overlay.className = "ait-overlay";
   overlay.innerHTML = `
@@ -26,12 +26,28 @@ export function renderIndexing() {
       <span class="ait-badge ait-verdict-loading">Indexing…</span>
     </div>
     <div class="ait-detail-line">Please wait, indexing video...</div>
-    <div class="ait-subtext">This may take a while. Check back later!</div>
+    <div class="ait-subtext"></div>
   `;
+  overlay.querySelector(".ait-subtext").textContent =
+    retryCount > 0
+      ? `Continuing to index, taking longer than usual (${retryCount}/${MAX_INDEXING_RETRIES})...`
+      : "This may take a while. Check back later!";
 }
 
 export function renderIndexingFailed(detail) {
   renderNotice("Indexing failed", detail || "Analysis failed. See the backend logs.");
+}
+
+export function renderEvaluationFailed() {
+  const overlay = ensureOverlay();
+  overlay.className = "ait-overlay";
+  overlay.innerHTML = `
+    <div class="ait-header">
+      <span class="ait-title">Alive Internet Theory</span>
+      <span class="ait-badge ait-verdict-error">Evaluation failed</span>
+    </div>
+    <div class="ait-subtext">Try again later.</div>
+  `;
 }
 
 function renderNotice(badgeText, message) {

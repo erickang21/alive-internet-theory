@@ -1,3 +1,3 @@
-from backend.scoring.engine import evaluate_video
+from backend.scoring.engine import UpstreamScoringError, evaluate_video
 
-__all__ = ["evaluate_video"]
+__all__ = ["UpstreamScoringError", "evaluate_video"]

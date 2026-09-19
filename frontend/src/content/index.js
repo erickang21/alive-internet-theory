@@ -1,8 +1,9 @@
-import { MESSAGE_TYPES } from "../shared/constants.js";
+import { MAX_INDEXING_RETRIES, MESSAGE_TYPES } from "../shared/constants.js";
 import {
   removeOverlay,
   renderError,
   renderEvaluation,
+  renderEvaluationFailed,
   renderIndexing,
   renderIndexingFailed,
   renderLoading,
@@ -31,6 +32,8 @@ async function showCurrentVideo() {
 
   renderLoading();
   let indexingShown = false;
+  // Counts retryable upstream failures (GPTZero); shown as "(retryCount/N)".
+  let retryCount = 0;
   try {
     while (videoId === currentVideoId) {
       const response = await chrome.runtime.sendMessage({
@@ -44,9 +47,20 @@ async function showCurrentVideo() {
       }
 
       const result = response.result;
+      if (result.status === "retry") {
+        retryCount += 1;
+        if (retryCount > MAX_INDEXING_RETRIES) {
+          renderEvaluationFailed();
+          return;
+        }
+        // Re-attempt right away; the backend stored nothing and starts fresh.
+        renderIndexing(retryCount);
+        indexingShown = true;
+        continue;
+      }
       if (result.status === "indexing") {
         if (!indexingShown) {
-          renderIndexing();
+          renderIndexing(retryCount);
           indexingShown = true;
         }
         await sleep(POLL_INTERVAL_MS);
