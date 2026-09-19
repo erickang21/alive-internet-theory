@@ -16,7 +16,9 @@ backend/analyze.py         CLI: resolve targets → download → transcript → 
 backend/ytdlp.py           All YouTube access (target expansion, downloads, channel uploads + 24h cache)
 backend/transcripts.py     Caption parsing (json3/vtt), faster-whisper fallback
 backend/scoring/           Scoring engine (starts at 100, deducts per AI evidence) + per-criterion modules
-backend/api/               Flask API: GET/POST /video/evaluation, POST /video/community-vote, background indexing
+backend/factcheck/         Claim extraction → web evidence → verification → Validity Score
+backend/browserbase.py     All web access (Browserbase search + fetch, markdown)
+backend/api/               Flask API: GET/POST /video/evaluation, GET /video/fact-check, POST /video/community-vote, background indexing
 backend/database/          SQLAlchemy models + repositories on SQLite, Alembic migrations
 ```
 
@@ -27,7 +29,7 @@ Storage: SQLite at `SQLITE_PATH` (default `backend/data/alive_internet_theory.db
 | Criterion | Deduction | Data source |
 |---|---|---|
 | GPTZero transcript scan | up to −45 | GPTZero `/v2/predict/text` (see below) |
-| Fact check (`fact_check`) | **not scored yet** (TBD) | Claude Opus 5 + web search over the transcript (see Fact check section) |
+| Fact check → Validity Score | **not scored yet** (TBD); reported as its own independent score | Claim extraction + Browserbase search/fetch + per-claim verification (see Fact check section) |
 | Stutters / filler words (absence ⇒ AI) | up to −20 | Transcript text analysis, ASR tracks only (see Filler-word section) |
 | Upload frequency + video length | up to −10 | Exact upload timestamps of the channel's latest 20 uploads via yt-dlp (see yt-dlp section) |
 | Account age | up to −5 | Exact timestamp of the channel's **oldest upload** via yt-dlp, a proxy because the creation date isn't available |
@@ -96,23 +98,91 @@ Pattern list grows per release — **don't hardcode it**. Could power "which phr
 
 ---
 
-## Fact check (hallucination detection) — `backend/scoring/fact_check.py`
+## Fact check → Validity Score — `backend/factcheck/`
 
-The transcript goes through an LLM (Claude, `claude-opus-5`, Anthropic Python SDK) to produce three fields, stored as their own `videos` columns and returned by the API:
+The transcript goes through a five-stage pipeline that extracts individual factual
+claims, gathers live web evidence for each one, and scores the video's overall
+factual accuracy. The old single-thesis Anthropic check is gone.
 
-- `is_educational` (bool): is the video non-fiction whose main purpose is checkable factual claims? Only educational content is fact-checked. Fiction, comedy, music, gaming and vlogs are not.
-- `thesis` (string): the main thesis in one sentence. Set only when educational.
-- `hallucinated` (bool): **false only when independent third-party sources confirm the thesis is correct**. True when they contradict it or when nothing independent confirms it. Set only when educational.
+```
+backend/browserbase.py     All web access: POST /v1/search, POST /v1/fetch (markdown)
+backend/factcheck/
+  engine.py                FactCheckEngine.run() orchestrates the five stages
+  extract.py      (M1)     transcript → atomic claims + significance weight + search query
+  evidence.py     (M2)     claim → ranked, fetched, trimmed sources
+  verify.py       (M3)     claim × sources → status, debunk, verified citations
+  validity.py     (M4)     weighted Validity Score + rating bands (pure, no I/O)
+  report.py       (M5)     markdown report + JSON payload
+  llm.py                   provider shim: openai (default) | gateway | anthropic
+  models.py, text_utils.py dataclasses + normalize_for_match
+  __main__.py              standalone CLI
+```
 
-All three are null when the check couldn't run. **Without usable Anthropic credentials** (none configured, a placeholder or invalid key, or an `ant` profile with no credentials file), the first video logs one warning and the fact check is skipped for the rest of the run without sending more requests. The breakdown says "Skipped: no usable Anthropic credentials." Everything else still runs and is stored. Adding a key later doesn't backfill: rerun those videos with `--force`. The breakdown entry also carries a justification and source URLs as evidence.
+**Validity Score** — `V = Σ(wᵢ·sᵢ) / Σwᵢ × 100` over *verifiable* claims only.
+Weights: 3 = core thesis, 2 = major supporting stat, 1 = minor background.
+Scores: verified_true 1.0, mostly_true 0.75, misleading 0.25, false 0.0,
+unverifiable excluded from **both** numerator and denominator.
+Bands: ≥85 Highly Accurate · 65–84 Mostly Reliable · 40–64 Misleading Content Risk ·
+<40 High Falsehood / Unreliable. No verifiable claims ⇒ score `null`,
+"Insufficient Verifiable Data". Under 3 verifiable claims sets `low_confidence`.
 
-Two calls: (1) classification with a JSON-schema `output_config.format`; (2) for educational videos only, verification with the server-side `web_search_20260209` tool (max 5 searches). The verdict comes back through a `strict` `report_verdict` tool, because JSON output formats don't mix reliably with web-search citations. The verify loop resumes `pause_turn` up to 5 times. Both calls set `fallbacks="default"` (beta `server-side-fallback-2026-07-01`) so a safety decline re-runs on Anthropic's recommended fallback model; a final `refusal` fails the criterion.
+**The Validity Score is independent of the AI-slop score.** Being wrong and being
+AI-generated are different questions. The `fact_check` breakdown entry stays
+`applied: false, deduction: 0` — choosing a deduction is still an open decision.
 
-**Not scored yet:** the entry has `applied: false, deduction: 0`, so it shows as "n/a" with its detail text in the overlay. Choosing a deduction is an open decision.
+**Anti-hallucination is enforced in code, not prompt** (`verify.py::_validate_citations`).
+For every citation the model proposes: the `source_index` must resolve to a page we
+actually fetched; the quote must survive a `normalize_for_match` substring check against
+that source's **full** markdown (not the trimmed excerpt the model saw); and the emitted
+url/domain/title come from **our** `Source` record, never model output — so a URL cannot
+be fabricated even in principle. Quotes under 4 words / 20 chars are rejected ("the"
+substring-matches any page). A `false`/`misleading` verdict left with zero surviving
+citations is **downgraded to `unverifiable`** rather than trusted. `normalize_for_match`
+strips markdown links, emphasis, headings, blockquotes, bullets and table pipes, because
+a model quotes the *visible* text of a `**bolded**` sentence.
 
-Rejected alternative: GPTZero `/v2/bibliography-scan/text`. It expects documents with a works-cited section (which transcripts don't have) and is limited to 10 req/minute.
+**Source tiering** (`evidence.py`): Tier 1 = any `.gov/.edu/.int` plus named agencies and
+journals; Tier 2 = established outlets and fact-checkers; Tier 3 = everything else.
+Reddit, Quora, Medium, YouTube, social media, Substack and Wikipedia are excluded
+outright — citing a forum thread is worse than saying "unverifiable". Results rank by
+(tier, original rank).
 
-Auth: `ANTHROPIC_API_KEY`, or an `ant auth login` profile for venv runs (a set `ANTHROPIC_API_KEY`, even a placeholder, overrides the profile).
+**Trimming matters**: a real CDC page came back at 39,382 chars. `excerpt_for` keeps the
+lede plus the paragraphs richest in claim keywords, in document order, within a 6,000-char
+budget (~85% reduction), dropping nav menus and duplicate blocks that otherwise ate ~half
+the budget. `Source.markdown` keeps the full text so quote verification stays sound.
+
+**Concurrency**: `gather_all` runs every claim's searches and fetches through ONE shared
+`ThreadPoolExecutor`, never a pool nested in a pool, so total in-flight Browserbase calls
+stay bounded by `FACTCHECK_CONCURRENCY`.
+
+**Legacy columns** `is_educational` / `thesis` / `hallucinated` are still written, derived
+from the report so the extension keeps working: `is_educational` = ≥3 claims or one
+weight-3 claim; `thesis` = highest-weight claim; `hallucinated` = that claim rated
+false/misleading (an *unverifiable* thesis is **not** hallucinated — we couldn't check it,
+which isn't the same as the video being wrong). All three are null when the check
+couldn't run.
+
+**Degradation**: no usable LLM credentials ⇒ one warning, the criterion is skipped for the
+rest of the run, everything else still scores and stores. Nothing in this pipeline may
+raise into `analyze.py`. Adding a key later doesn't backfill — rerun with `--force`.
+
+**Auth**: `BROWSERBASE_API_KEY` (browsing) + one LLM key. `FACTCHECK_LLM_PROVIDER`
+defaults to `openai` (`OPENAI_API_KEY`). Browserbase **Model Gateway has no public REST
+endpoint** — it routes inside Stagehand only — so the `gateway` provider needs
+`BROWSERBASE_GATEWAY_URL` set and raises a clear error otherwise. `anthropic` remains
+selectable. **Never** set `BROWSERBASE_PROJECT_ID`; the API key resolves the project.
+
+Rejected alternative: GPTZero `/v2/bibliography-scan/text`. It expects documents with a
+works-cited section (which transcripts don't have) and is limited to 10 req/minute.
+
+**CLI / API**
+```
+python -m backend.factcheck <video_id> [--transcript FILE] [--format markdown|json]
+                                       [--max-claims N] [--no-store]
+GET /video/fact-check?video_id=…&format=json|markdown
+GET /video/evaluation?video_id=…      # now also carries validity_score, validity_rating
+```
 
 ---
 

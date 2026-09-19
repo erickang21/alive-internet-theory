@@ -97,6 +97,10 @@ def evaluate_video(
         "is_educational": facts.get("is_educational"),
         "thesis": facts.get("thesis"),
         "hallucinated": facts.get("hallucinated"),
+        # Validity Score from the fact-check engine: independent of `score`
+        # above (fact_check is never applied to the AI-slop deduction math).
+        "validity_score": facts.get("validity_score"),
+        "validity_rating": facts.get("validity_rating"),
     }
 
 

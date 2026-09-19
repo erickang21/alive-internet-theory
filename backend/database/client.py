@@ -21,7 +21,13 @@ CHANNEL_CACHE_TTL = timedelta(hours=24)
 # read as a 0.0h median gap between same-day uploads.
 CHANNEL_CACHE_VERSION = 2
 # Evaluation keys stored as their own `videos` columns rather than inside `data`.
-VIDEO_COLUMNS = ("is_educational", "thesis", "hallucinated")
+VIDEO_COLUMNS = (
+    "is_educational",
+    "thesis",
+    "hallucinated",
+    "validity_score",
+    "validity_rating",
+)
 ALEMBIC_INI = Path(__file__).parents[1] / "alembic.ini"
 
 

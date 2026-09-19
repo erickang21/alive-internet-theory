@@ -35,6 +35,12 @@ class Video(Base):
     is_educational: Mapped[bool | None] = mapped_column()
     thesis: Mapped[str | None] = mapped_column()
     hallucinated: Mapped[bool | None] = mapped_column()
+    # Validity Score from the fact-check engine (backend/factcheck/): a
+    # weighted-average score across ALL extracted claims, independent of the
+    # legacy single-thesis fields above and of the AI-slop score. Null when
+    # the engine hasn't run or found nothing verifiable.
+    validity_score: Mapped[float | None] = mapped_column()
+    validity_rating: Mapped[str | None] = mapped_column()
     created_at: Mapped[datetime] = mapped_column()
     updated_at: Mapped[datetime] = mapped_column()
 
