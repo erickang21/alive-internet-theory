@@ -20,7 +20,15 @@ const MIME_TYPES = {
 };
 
 function resolveRequestPath(url) {
-  const decoded = decodeURIComponent(url.split("?")[0]);
+  let decoded;
+  try {
+    decoded = decodeURIComponent(url.split("?")[0]);
+  } catch {
+    // A malformed escape ("/%E0%A4%A", a lone "%") makes decodeURIComponent
+    // throw URIError. The request handler is async with nothing around this
+    // call, so an uncaught throw here kills the whole server on one request.
+    return null;
+  }
   const relative = normalize(decoded === "/" ? DEFAULT_PAGE : decoded);
   const full = resolve(join(ROOT, relative));
   // Block path traversal: the resolved path must stay under ROOT.

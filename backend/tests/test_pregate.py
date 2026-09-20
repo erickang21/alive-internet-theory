@@ -94,8 +94,15 @@ def test_missing_categories_fall_through_to_the_classifier(spy, categories):
     assert spy.called
 
 
-def test_bypass_wins_when_a_video_carries_several_categories(spy):
-    result = _gate(categories=["Gaming", "Education"])
+@pytest.mark.parametrize(
+    "categories",
+    [["Gaming", "Education"], ["Education", "Gaming"]],
+    ids=["bypass-first", "proceed-first"],
+)
+def test_bypass_wins_regardless_of_category_order(spy, categories):
+    # Both orderings, because the earlier single-order test only proved "the
+    # first list entry wins" while being named as though it proved precedence.
+    result = _gate(categories=categories)
     assert result.is_eligible is False
     assert not spy.called
 
@@ -241,3 +248,39 @@ def test_tier1_eligibility_agrees_with_the_taxonomy_mapping(spy):
     for category in PROCEED_CATEGORIES:
         result = _gate(categories=[category])
         assert result.is_eligible is pregate.is_eligible_category(result.category)
+
+
+# --- shapes a caller might actually pass -------------------------------------
+# `categories` is untyped at runtime, and iterating a bare string yields
+# characters - which matched nothing and silently paid for an LLM call.
+
+
+@pytest.mark.parametrize(
+    ("categories", "expect_eligible"),
+    [("Education", True), ("Gaming", False)],
+)
+def test_a_bare_string_category_still_uses_tier_1(spy, categories, expect_eligible):
+    result = _gate(categories=categories)
+    assert result.source == "category"
+    assert result.is_eligible is expect_eligible
+    assert not spy.called, "a caller's type slip must not cost an LLM call"
+
+
+@pytest.mark.parametrize("categories", [{"a": 1}, 42, object()])
+def test_nonsense_categories_types_fall_through_without_raising(spy, categories):
+    spy.result = {"category": "educational", "reason": "ok"}
+    assert isinstance(_gate(categories=categories), PreGateResult)
+
+
+def test_non_string_entries_are_ignored_not_crashed_on(spy):
+    result = _gate(categories=[None, 42, "Gaming"])
+    assert result.is_eligible is False
+    assert not spy.called
+
+
+def test_tier1_never_stores_a_category_contradicting_its_decision(spy):
+    # A "skipped" card labelled "educational" would be a visible lie; derive
+    # eligibility from the taxonomy rather than hardcoding it per branch.
+    for category in sorted(BYPASS_CATEGORIES | PROCEED_CATEGORIES):
+        result = _gate(categories=[category])
+        assert result.is_eligible is pregate.is_eligible_category(result.category), category

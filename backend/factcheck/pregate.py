@@ -203,24 +203,51 @@ def pre_gate(
         return PreGateResult(False, CATEGORY_INSUFFICIENT_SIGNAL, REASON_INSUFFICIENT, SOURCE_LLM)
 
     # 2/3. YouTube already told us, for free.
-    for category in categories or []:
+    #
+    # Bypass is checked across ALL categories before proceed, so a video tagged
+    # both "Gaming" and "Education" resolves the same way whichever order
+    # yt-dlp happened to list them in. Iterating once and returning on the
+    # first hit made the answer depend on list order.
+    known = _known_categories(categories)
+    for category in known:
         if category in BYPASS_CATEGORIES:
-            return PreGateResult(
-                False,
-                _taxonomy_for_youtube_category(category),
-                REASON_BYPASS_CATEGORY.format(category=category),
-                SOURCE_CATEGORY,
-            )
+            return _tier1_result(category, REASON_BYPASS_CATEGORY)
+    for category in known:
         if category in PROCEED_CATEGORIES:
-            return PreGateResult(
-                True,
-                _taxonomy_for_youtube_category(category),
-                REASON_PROCEED_CATEGORY.format(category=category),
-                SOURCE_CATEGORY,
-            )
+            return _tier1_result(category, REASON_PROCEED_CATEGORY)
 
     # 4. Ambiguous or unlabelled - ask the model.
     return _classify(title, description, transcript)
+
+
+def _known_categories(categories: Any) -> list[str]:
+    """The string entries of `categories`, tolerating any shape a caller passes.
+
+    A bare string is rejected rather than iterated: `for c in "Education"`
+    yields characters, none of which match, which would silently throw away the
+    free Tier 1 signal and pay for an LLM call instead.
+    """
+    if isinstance(categories, str):
+        logger.warning("pre_gate: `categories` was a string (%r); expected a list", categories)
+        return [categories]
+    if not isinstance(categories, (list, tuple, set, frozenset)):
+        if categories is not None:
+            logger.warning("pre_gate: ignoring `categories` of type %s", type(categories).__name__)
+        return []
+    return [c for c in categories if isinstance(c, str)]
+
+
+def _tier1_result(category: str, reason_template: str) -> PreGateResult:
+    # Eligibility is derived from the taxonomy here too, exactly as Tier 2 does
+    # it, so the stored category can never contradict the decision (a "skipped"
+    # card labelled "educational").
+    taxonomy = _taxonomy_for_youtube_category(category)
+    return PreGateResult(
+        is_eligible_category(taxonomy),
+        taxonomy,
+        reason_template.format(category=category),
+        SOURCE_CATEGORY,
+    )
 
 
 # YouTube's labels are coarser than our taxonomy; map the unambiguous ones so the

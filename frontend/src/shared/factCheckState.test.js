@@ -293,3 +293,68 @@ test("the in-memory fallback also evicts", async () => {
   assert.equal((await getFactCheckState(`v${FACT_CHECK_MAX_RECORDS + 3}`)).stage, "fact_checking");
   assert.equal((await getFactCheckState("v0")).stage, "idle");
 });
+
+// --- a failed write must not look like a success -----------------------------
+// Eviction exists to stop the write below hitting the 10MB quota. Running it
+// AFTER the write made it useless in exactly that case: the failing write
+// skipped its own eviction, so every later write failed too and the extension
+// was wedged until storage was cleared by hand.
+
+test("a rejected set() surfaces instead of returning a fake-success record", async () => {
+  globalThis.chrome.storage.local.set = async () => {
+    throw new Error("QUOTA_BYTES quota exceeded");
+  };
+  await assert.rejects(
+    () => setFactCheckState("v1", { stage: "fact_checking" }),
+    /failed to persist/,
+  );
+});
+
+test("eviction runs before the write, so a full store can still be written to", async () => {
+  for (let i = 0; i < FACT_CHECK_MAX_RECORDS + 3; i++) {
+    store[factCheckKey(`v${i}`)] = {
+      ...idleRecord(`v${i}`),
+      stage: "fact_checking",
+      updatedAt: new Date(1000 + i * 1000).toISOString(),
+    };
+  }
+  const removed = [];
+  const realRemove = globalThis.chrome.storage.local.remove;
+  const order = [];
+  globalThis.chrome.storage.local.remove = async (keys) => {
+    order.push("remove");
+    removed.push(...(Array.isArray(keys) ? keys : [keys]));
+    return realRemove(keys);
+  };
+  const realSet = globalThis.chrome.storage.local.set;
+  globalThis.chrome.storage.local.set = async (items) => {
+    order.push("set");
+    return realSet(items);
+  };
+
+  await setFactCheckState("newest", { stage: "fact_checking" });
+  assert.deepEqual(order, ["remove", "set"], "eviction must precede the write");
+  assert.ok(removed.length > 0);
+  assert.ok(factCheckKey("newest") in store);
+});
+
+// --- shape, not just presence ------------------------------------------------
+
+for (const [label, record] of [
+  ["a string result", { stage: "complete", result: "oops a string" }],
+  ["an array result", { stage: "complete", result: [1, 2] }],
+  ["non-array verdicts", { stage: "complete", result: { verdicts: "nope" } }],
+  ["a string error", { stage: "failed", error: "just a string" }],
+  ["an error with no message", { stage: "failed", error: { retryable: true } }],
+  ["an array pregate", { stage: "fact_checking", pregate: [1, 2, 3] }],
+  ["a pregate without isEligible", { stage: "fact_checking", pregate: { category: "news" } }],
+]) {
+  test(`validateRecord rejects ${label}`, () => {
+    assert.throws(() => validateRecord({ ...idleRecord("v"), ...record }));
+  });
+}
+
+test("a shape-invalid record cannot be persisted", async () => {
+  await assert.rejects(() => setFactCheckState("v1", { stage: "complete", result: "garbage" }));
+  assert.equal((await getFactCheckState("v1")).stage, "idle");
+});

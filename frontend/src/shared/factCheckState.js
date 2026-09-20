@@ -48,9 +48,20 @@ export function idleRecord(videoId) {
   };
 }
 
-/** Throws if a record breaks an invariant, so an inconsistent one can't be stored. */
+function isPlainObject(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Throws if a record breaks an invariant, so an inconsistent one can't be stored.
+ *
+ * Shape is checked as well as presence. Checking only presence let
+ * `{stage: "complete", result: "oops a string"}` through, which the card
+ * survives today purely because every read of it is `??`-guarded - the first
+ * unguarded `result.verdicts.map(...)` would crash on it instead.
+ */
 export function validateRecord(record) {
-  if (!record || typeof record !== "object") {
+  if (!isPlainObject(record)) {
     throw new Error("fact-check record must be an object");
   }
   if (!FACT_CHECK_STAGES.includes(record.stage)) {
@@ -58,12 +69,28 @@ export function validateRecord(record) {
   }
   const hasResult = record.result !== null && record.result !== undefined;
   const hasError = record.error !== null && record.error !== undefined;
+  const hasPregate = record.pregate !== null && record.pregate !== undefined;
 
   if (hasResult !== (record.stage === "complete")) {
     throw new Error("`result` must be set exactly when stage is 'complete'");
   }
   if (hasError !== (record.stage === "failed")) {
     throw new Error("`error` must be set exactly when stage is 'failed'");
+  }
+  if (hasResult && !isPlainObject(record.result)) {
+    throw new Error("`result` must be an object");
+  }
+  if (hasResult && record.result.verdicts !== undefined && !Array.isArray(record.result.verdicts)) {
+    throw new Error("`result.verdicts` must be an array");
+  }
+  if (hasError && (!isPlainObject(record.error) || typeof record.error.message !== "string")) {
+    throw new Error("`error` must be an object with a string `message`");
+  }
+  if (
+    hasPregate &&
+    (!isPlainObject(record.pregate) || typeof record.pregate.isEligible !== "boolean")
+  ) {
+    throw new Error("`pregate` must be an object with a boolean `isEligible`");
   }
   if (record.stage === "skipped_fiction" && record.pregate?.isEligible !== false) {
     throw new Error("'skipped_fiction' requires a pregate with isEligible false");
@@ -166,13 +193,26 @@ export async function setFactCheckState(videoId, patch) {
     return next;
   }
 
+  // Evict BEFORE writing, not after. Eviction exists to keep the write below
+  // from hitting the 10MB quota, so running it afterwards makes it useless in
+  // exactly the case it was built for: the failing write skips its own
+  // eviction, so the next write fails too, and the extension is wedged until
+  // someone clears storage by hand.
   try {
-    await area.set({ [key]: next });
     const stale = keysToEvict(await readAll(), key);
     if (stale.length) await area.remove(stale);
   } catch {
-    // A failed write must not take the caller down; the UI will just keep
-    // showing the previous stage until the next update lands.
+    // Eviction is best-effort; a failure here must not block the write.
+  }
+
+  try {
+    await area.set({ [key]: next });
+  } catch (error) {
+    // Don't return a record implying success - the caller needs to be able to
+    // tell that nothing was persisted.
+    throw new Error(`failed to persist fact-check state for ${videoId}: ${error?.message}`, {
+      cause: error,
+    });
   }
   return next;
 }
