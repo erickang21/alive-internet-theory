@@ -1,7 +1,9 @@
 import { MESSAGE_TYPES, RERUN_EVENT } from "../shared/constants.js";
 import { Card } from "../ui/Card.jsx";
 import { ErrorCard } from "../ui/ErrorCard.jsx";
+import { FactCheck } from "../ui/FactCheck.jsx";
 import { Skeleton } from "../ui/Skeleton.jsx";
+import { createFactCheckBridge } from "./factCheckBridge.js";
 import { initFilter } from "./filter.js";
 import { hideCard, showCard } from "./mount.js";
 
@@ -19,6 +21,12 @@ const REPLY_TIMEOUT_MS = 25_000;
 // verdict) straight back. Without it the skeleton would shimmer for up to
 // REQUEST_TIMEOUT_MS against a backend that accepts the connection and then hangs.
 const SILENCE_MS = 2_000;
+
+// The fact-check gets its own poll loop (30s cadence: a check takes minutes) and
+// NEVER shares the score poll below, whose whole design is to stop the moment a
+// verdict settles - minutes before the fact-check has anything to say. The bridge
+// writes chrome.storage records; the card's FactCheck section renders from them.
+const factCheckBridge = createFactCheckBridge();
 
 let currentVideoId = null;
 let pollTimer = null;
@@ -69,9 +77,13 @@ async function showCurrentVideo() {
   // than inheriting the last one's colour until its first answer comes back.
   send({ type: MESSAGE_TYPES.CLEAR_INDICATOR });
   if (!videoId) {
+    factCheckBridge.stop();
     hideCard();
     return;
   }
+  // start() tears down the previous video's loop first, so a navigation can
+  // never leave two bridges writing records.
+  factCheckBridge.start(videoId);
   // The request goes out with the page, so the skeleton goes up with it: the card is
   // never missing while an answer is on its way.
   showSkeleton();
@@ -168,7 +180,14 @@ async function showEvaluation(videoId, token, first) {
     showError("failed", result.detail);
     return true;
   }
-  showCard(<Card evaluation={result} celebrate={!first} floating={isFloating()} />);
+  showCard(
+    <Card
+      evaluation={result}
+      celebrate={!first}
+      floating={isFloating()}
+      factCheck={<FactCheck videoId={videoId} onRetry={() => factCheckBridge.retry(videoId)} />}
+    />,
+  );
   return true;
 }
 

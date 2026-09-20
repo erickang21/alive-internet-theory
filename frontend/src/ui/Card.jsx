@@ -64,7 +64,7 @@ const BreakdownLink = styled.button`
   }
 `;
 
-export function Card({ evaluation, celebrate, floating }) {
+export function Card({ evaluation, celebrate, floating, factCheck = null }) {
   const [panelOpen, setPanelOpen] = useState(false);
   const [thanked, setThanked] = useState(false);
   const vote = useVote(evaluation);
@@ -97,6 +97,7 @@ export function Card({ evaluation, celebrate, floating }) {
           <BreakdownLink ref={link} type="button" onClick={() => setPanelOpen(true)}>
             View breakdown
           </BreakdownLink>
+          {factCheck}
         </Body>
         {thanked && <Thanks />}
         {celebrate && <Ring />}
