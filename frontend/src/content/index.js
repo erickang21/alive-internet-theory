@@ -1,5 +1,6 @@
 import { MESSAGE_TYPES } from "../shared/constants.js";
 import { getFilterState, subscribeFilterState } from "../shared/filterState.js";
+import { getCachedScores } from "../shared/scoreCache.js";
 import { applyFilter, clearFilter } from "./filterRenderer.js";
 import { extractVideoId, findVideoTiles, observeVideoTiles } from "./videoScanner.js";
 import {
@@ -58,6 +59,34 @@ async function scoresForVideoIds(videoIds) {
   }
 }
 
+// Reads the persistent score cache directly (no background round trip - content
+// scripts already read chrome.storage.local directly for filter state, for the same
+// reason: the side panel that could message this tab is closed almost all the time).
+// This is what makes a revisited video flag instantly instead of after a fetch: the
+// cache survives service-worker restarts even though the in-memory Map in background
+// doesn't.
+async function cachedScoresForVideoIds(videoIds) {
+  if (videoIds.length === 0) return {};
+  try {
+    const records = await getCachedScores(videoIds);
+    const scores = {};
+    for (const [id, record] of Object.entries(records)) scores[id] = record?.score ?? null;
+    return scores;
+  } catch (error) {
+    console.warn("[alive-internet-theory]", error);
+    return {};
+  }
+}
+
+function applyScoresToTiles(state, idByTile, scores) {
+  const tilesWithScores = Array.from(idByTile.entries()).map(([tile, videoId]) => ({
+    tile,
+    videoId,
+    score: scores[videoId] ?? null,
+  }));
+  applyFilter(state, tilesWithScores);
+}
+
 async function rescanAndApplyFilter(tiles) {
   // "Off" means leave no trace, not "decorate nothing": clearFilter is what removes the
   // injected <style> tag and any decoration left over from a previous state. Doing this
@@ -80,21 +109,27 @@ async function rescanAndApplyFilter(tiles) {
   }
 
   const uniqueIds = Array.from(new Set(idByTile.values()));
-  const scores = await scoresForVideoIds(uniqueIds);
+  const state = await getFilterState();
+
+  // Instant pass, BEFORE asking the background for anything: a video seen (and
+  // cached) in a previous session flags on first paint instead of after a round
+  // trip through GET_EVALUATIONS. applyFilter is idempotent per tile (see
+  // filterRenderer's module header), so re-running it below once fresh scores
+  // arrive is always safe, never a flicker for a tile whose state didn't change.
+  const cachedScores = await cachedScoresForVideoIds(uniqueIds);
+  applyScoresToTiles(state, idByTile, cachedScores);
+
+  // Then refresh: the background may know about a video newly analyzed since it
+  // was last cached, or a real score that supersedes a cached "not analyzed" miss.
+  const freshScores = await scoresForVideoIds(uniqueIds);
 
   lastFilterStats = {
     total: uniqueIds.length,
-    analyzed: uniqueIds.filter((id) => scores[id] !== null && scores[id] !== undefined).length,
+    analyzed: uniqueIds.filter((id) => freshScores[id] !== null && freshScores[id] !== undefined)
+      .length,
   };
 
-  const tilesWithScores = Array.from(idByTile.entries()).map(([tile, videoId]) => ({
-    tile,
-    videoId,
-    score: scores[videoId] ?? null,
-  }));
-
-  const state = await getFilterState();
-  applyFilter(state, tilesWithScores);
+  applyScoresToTiles(state, idByTile, freshScores);
 }
 
 // Re-apply whenever the stored filter state changes (panel elsewhere, another tab, or

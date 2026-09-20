@@ -56,3 +56,18 @@ export const FACT_CHECK_SCHEMA_VERSION = 1;
 // chrome.storage.local caps at 10MB without `unlimitedStorage`, and a 40-claim
 // report runs 30-60KB, so an unbounded cache starts failing writes silently.
 export const FACT_CHECK_MAX_RECORDS = 50;
+
+// --- Persistent AI score cache ---------------------------------------------
+// The service worker's in-memory score Map is wiped whenever MV3 recycles it
+// (~30s idle), so a revisited video re-fetches every time. This durable cache
+// survives that, keyed the same way as the fact-check cache above.
+
+export const SCORE_KEY_PREFIX = "aitScore:";
+export const SCORE_SCHEMA_VERSION = 1;
+// Records are ~100 bytes (far smaller than a fact-check report), but still
+// bounded so a long browsing session can't grow chrome.storage.local unbounded.
+export const SCORE_MAX_RECORDS = 200;
+// A `null` score means "not analyzed YET", which stops being true the moment a
+// dev runs the analyzer, so - unlike a real score - it expires. Matches the
+// service worker's existing in-memory miss TTL.
+export const SCORE_MISS_TTL_MS = 60_000;

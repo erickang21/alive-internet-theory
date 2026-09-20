@@ -1,4 +1,5 @@
 import { API_BASE_URL, MESSAGE_TYPES } from "../shared/constants.js";
+import { getCachedScore, putCachedScore } from "../shared/scoreCache.js";
 
 // The service worker owns backend calls: its host_permissions exempt it from
 // the CORS and private-network checks a youtube.com content script would hit
@@ -119,9 +120,7 @@ async function scoreFor(videoId) {
   if (inFlight.has(videoId)) return inFlight.get(videoId);
 
   const promise = acquireSlot()
-    .then(() => storedEvaluation(videoId))
-    .then((evaluation) => evaluation?.score ?? null)
-    .catch(() => null) // network error -> null, same as "not analyzed"
+    .then(() => lookupScore(videoId))
     .then((score) => {
       scoreCache.set(videoId, score);
       if (score === null) missExpiry.set(videoId, Date.now() + MISS_TTL_MS);
@@ -133,4 +132,33 @@ async function scoreFor(videoId) {
 
   inFlight.set(videoId, promise);
   return promise;
+}
+
+// Cold-start layer, underneath the in-memory Map above: that Map is wiped
+// every time MV3 recycles this worker (~30s idle), so without this a
+// revisited video would re-fetch from the network every single time. The
+// persistent cache survives worker restarts, so it's checked first; a
+// successful network lookup (found OR a real "not analyzed" 404) is written
+// through so the next cold start is instant too.
+async function lookupScore(videoId) {
+  const persisted = await getCachedScore(videoId).catch(() => null);
+  if (persisted !== null) return persisted.score;
+
+  let evaluation;
+  try {
+    evaluation = await storedEvaluation(videoId);
+  } catch {
+    // Network error: same as "not analyzed" for this call, but NOT a
+    // successful lookup, so it isn't written through to the persistent miss
+    // cache - a transient backend outage shouldn't get pinned as a real miss.
+    return null;
+  }
+
+  const score = evaluation?.score ?? null;
+  const verdict = score === null ? null : (evaluation?.verdict ?? null);
+  await putCachedScore(videoId, { score, verdict }).catch(() => {
+    // Persistence is best-effort; the in-memory cache above still works this
+    // session even if chrome.storage is unavailable or over quota.
+  });
+  return score;
 }
