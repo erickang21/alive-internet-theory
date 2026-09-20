@@ -239,3 +239,10 @@
 .ait-fc-failed-title {
   color: #ff7b72;
 }
+
+/* A citation whose url wasn't a safe scheme: shown as inert text, since the
+   quote is still evidence even when the link can't be trusted. */
+.ait-fc-source-unsafe {
+  color: #888;
+  word-break: break-word;
+}

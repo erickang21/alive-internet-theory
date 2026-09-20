@@ -25,6 +25,8 @@ const STATUS_LABELS = {
   unverifiable: "Unverifiable",
 };
 
+const SAFE_URL_PROTOCOLS = new Set(["http:", "https:"]);
+
 // Only these are worth surfacing at the top level; the rest live behind the toggle.
 const DAMAGING_STATUSES = new Set(["false", "misleading"]);
 
@@ -45,6 +47,27 @@ function formatTimestamp(seconds) {
 
 function scoreClassName(score) {
   return RATING_CLASS.find((band) => score >= band.min).className;
+}
+
+/**
+ * A citation url, or null when it isn't safe to make clickable.
+ *
+ * Citation urls are third-party data. A `javascript:` href here would not be an
+ * ordinary page XSS - this card renders inside extension pages, so it would run
+ * with the extension's privileges. Allow-list the two schemes a source can
+ * legitimately use instead of trying to spot bad ones.
+ */
+function safeHref(url) {
+  if (typeof url !== "string") return null;
+  try {
+    // Parsed with no base on purpose: a citation url is always absolute, and a
+    // base would quietly turn "" or "not a url" into a link to the base host
+    // instead of rejecting it.
+    const parsed = new URL(url);
+    return SAFE_URL_PROTOCOLS.has(parsed.protocol) ? parsed.href : null;
+  } catch {
+    return null;
+  }
 }
 
 export function createFactCheckCard(options = {}) {
@@ -114,11 +137,21 @@ export function createFactCheckCard(options = {}) {
     if (citation.quote) {
       wrap.appendChild(el("blockquote", "ait-fc-quote", citation.quote));
     }
-    const link = el("a", "ait-fc-source", citation.title || citation.domain || citation.url);
-    link.href = citation.url ?? "#";
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    wrap.appendChild(link);
+
+    const label = citation.title || citation.domain || citation.url || "Source";
+    const href = safeHref(citation.url);
+    if (href) {
+      const link = el("a", "ait-fc-source", label);
+      link.href = href;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      wrap.appendChild(link);
+    } else {
+      // Render the label as inert text rather than dropping the citation
+      // entirely: the quote is still evidence, it just isn't clickable.
+      wrap.appendChild(el("span", "ait-fc-source-unsafe", label));
+    }
+
     if (citation.domain) wrap.appendChild(el("span", "ait-fc-domain", citation.domain));
     return wrap;
   }

@@ -533,3 +533,65 @@ test("the component never uses innerHTML", () => {
     "FactCheckCard renders model/scraped text and must avoid innerHTML",
   );
 });
+
+// --- citation url safety ----------------------------------------------------
+// Citation urls are third-party data. A `javascript:` href here wouldn't be an
+// ordinary page XSS: this card renders in extension pages, so it would run with
+// the extension's privileges. Unsafe urls render as inert text, keeping the
+// quote (still evidence) without a clickable link.
+
+const UNSAFE_URLS = [
+  "javascript:alert(1)",
+  "JaVaScRiPt:alert(1)",
+  " javascript:alert(1)",
+  "data:text/html,<script>alert(1)</script>",
+  "vbscript:msgbox(1)",
+  "file:///etc/passwd",
+  "chrome-extension://abcdef/page.html",
+  "blob:https://example.com/x",
+  "about:blank",
+  "//evil.example.com/x",
+  "/relative/path",
+  "not a url",
+  "",
+];
+
+for (const url of UNSAFE_URLS) {
+  test(`an unsafe citation url renders as inert text: ${JSON.stringify(url)}`, () => {
+    const record = completeRecord();
+    record.result.verdicts[1].citations = [{ ...CITATION, url }];
+    const { card, root } = mountCard(record);
+    card.update(record);
+    root.querySelector(".ait-fc-toggle").click();
+
+    assert.equal(root.querySelectorAll("a.ait-fc-source").length, 0, "must not be a link");
+    assert.equal(root.querySelectorAll(".ait-fc-source-unsafe").length, 1, "shown as text");
+    // The quote survives - the evidence is still worth showing.
+    assert.ok(root.textContent.includes(CITATION.quote));
+  });
+}
+
+for (const url of ["https://nasa.gov/x", "http://example.com/a?b=c#d"]) {
+  test(`a safe citation url is still a real link: ${url}`, () => {
+    const record = completeRecord();
+    record.result.verdicts[1].citations = [{ ...CITATION, url }];
+    const { card, root } = mountCard(record);
+    card.update(record);
+    root.querySelector(".ait-fc-toggle").click();
+
+    const link = root.querySelector("a.ait-fc-source");
+    assert.ok(link, "should render an anchor");
+    assert.equal(link.getAttribute("href") ?? link.href, url);
+    assert.equal(root.querySelectorAll(".ait-fc-source-unsafe").length, 0);
+  });
+}
+
+test("a citation with no url at all still shows its quote", () => {
+  const record = completeRecord();
+  record.result.verdicts[1].citations = [{ ...CITATION, url: undefined }];
+  const { card, root } = mountCard(record);
+  card.update(record);
+  root.querySelector(".ait-fc-toggle").click();
+  assert.equal(root.querySelectorAll("a.ait-fc-source").length, 0);
+  assert.ok(root.textContent.includes(CITATION.quote));
+});
