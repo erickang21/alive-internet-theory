@@ -2,7 +2,7 @@
   "name": "alive-internet-theory-extension",
   "version": "0.1.0",
   "private": true,
-  "description": "Chrome extension that rates YouTube videos as likely human, possibly AI, or AI slop",
+  "description": "Chrome extension that rates YouTube videos as likely human, possibly AI, or heavy AI use",
   "type": "module",
   "scripts": {
     "build": "node build.js",

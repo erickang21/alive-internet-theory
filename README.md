@@ -1,6 +1,6 @@
 # Alive Internet Theory
 
-Chrome extension that embeds a verdict card in YouTube watch pages and Shorts and rates videos **Likely human / Likely AI / AI Slop**. The backend pulls everything from YouTube with yt-dlp, scores it, and stores the result in SQLite. Videos get analyzed when devs run the analyze script on them, or quietly in the background the first time someone opens them with the extension. A Flask API serves the results to the extension. **New here? Start with [GUIDE.md](GUIDE.md)** (quick start and usage). See [CLAUDE.md](CLAUDE.md) for the full design reference.
+Chrome extension that embeds a verdict card in YouTube watch pages and Shorts and rates videos **Likely human / Likely AI / Heavy AI Use**. The backend pulls everything from YouTube with yt-dlp, scores it, and stores the result in SQLite. Videos get analyzed when devs run the analyze script on them, or quietly in the background the first time someone opens them with the extension. A Flask API serves the results to the extension. **New here? Start with [GUIDE.md](GUIDE.md)** (quick start and usage). See [CLAUDE.md](CLAUDE.md) for the full design reference.
 
 ## Layout
 
