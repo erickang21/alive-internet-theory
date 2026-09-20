@@ -6,44 +6,59 @@
   position: relative;
 }
 
-.ait-flag-badge {
+/* The mark covers the thumbnail and darkens the image behind its pill, so a flagged
+   tile reads as set aside without the title and channel fading with it. The weaker
+   band darkens less, so the two are told apart before the label is read. */
+.ait-mark {
+  --ait-flag: #cc0000;
   position: absolute;
-  top: 8px;
-  right: 8px;
+  inset: 0;
   z-index: 2;
-  padding: 1px 4px;
-  border-radius: 4px;
-  color: #fff;
-  font-family: "Roboto", "Arial", sans-serif;
-  font-size: 1.2rem;
-  line-height: 1.8rem;
-  font-weight: 500;
-  white-space: nowrap;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding: 6px;
+  border-radius: inherit;
+  background: rgb(0 0 0 / 50%);
   pointer-events: none;
 }
 
-.ait-flag-badge--ai {
-  background: #cc0000;
+.ait-mark--likely-ai {
+  --ait-flag: #e8710a;
+  background: rgb(0 0 0 / 30%);
 }
 
-.ait-flag-badge--likely-ai {
-  background: #e3b79b;
-  color: #3b2415;
+.ait-mark__pill {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px 2px 6px;
+  border-radius: 6px;
+  background: var(--ait-flag);
+  color: #fff;
+  font-family: "Roboto", "Arial", sans-serif;
+  font-size: 1.3rem;
+  line-height: 2rem;
+  font-weight: 500;
+  white-space: nowrap;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 40%);
 }
 
-.ait-flag-badge--likely-human {
-  background: #bcd3a4;
-  color: #24331a;
+.ait-mark__icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  fill: currentColor;
 }
 
-.ait-flag-inline {
-  display: inline-block;
-  margin-left: 4px;
-  color: #cc0000;
-  font-size: 1.2rem;
-  vertical-align: middle;
-}
-
-html[dark] .ait-flag-inline {
-  color: #ff4e45;
+/* Announced, never shown: the mark is visual only. */
+.ait-flag-note {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }

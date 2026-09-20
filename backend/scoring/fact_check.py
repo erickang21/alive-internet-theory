@@ -20,7 +20,7 @@ SKIPPED = {
     "criterion": "fact_check",
     "deduction": 0,
     "applied": False,
-    "detail": "Skipped: no usable Anthropic credentials.",
+    "reason": "no_credentials",
 }
 # Set on the first credentials failure so the rest of the run skips the fact
 # check with one warning instead of an error per video.
@@ -109,27 +109,22 @@ def score_transcript(transcript: str) -> dict[str, Any]:
             "criterion": "fact_check",
             "deduction": 0,
             "applied": False,
-            "detail": "Not educational content, so not fact-checked.",
+            "reason": "not_educational",
             "evidence": {"is_educational": False, "thesis": None, "hallucinated": None},
         }
 
     thesis = classification["thesis"]
     logger.info('fact check: educational, thesis "%s"; checking it with web search', thesis)
     verdict = _verify(client, thesis)
-    outcome = (
-        "not confirmed by independent sources"
-        if verdict["hallucinated"]
-        else "confirmed by independent sources"
-    )
     return {
         "criterion": "fact_check",
         "deduction": 0,
         "applied": False,
-        "detail": f'Thesis "{thesis}" is {outcome}. {verdict["justification"]}',
         "evidence": {
             "is_educational": True,
             "thesis": thesis,
             "hallucinated": verdict["hallucinated"],
+            "justification": verdict["justification"],
             "sources": verdict["sources"],
         },
     }

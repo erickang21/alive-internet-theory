@@ -28,7 +28,7 @@ def score_channel_history(siblings: list[dict[str, Any]]) -> dict[str, Any]:
             "criterion": "channel_history",
             "deduction": 0,
             "applied": False,
-            "detail": "No other videos from this channel have been analyzed yet.",
+            "reason": "no_siblings",
         }
 
     average = mean(video["score"] for video in recent)
@@ -41,9 +41,5 @@ def score_channel_history(siblings: list[dict[str, Any]]) -> dict[str, Any]:
         # A good track record is a bonus, which the engine sums as a negative deduction.
         "deduction": -adjustment if adjustment else 0.0,
         "applied": True,
-        "detail": (
-            f"{len(recent)} other analyzed video{'' if len(recent) == 1 else 's'} "
-            f"from this channel average {average:.1f}/100."
-        ),
         "evidence": {"videos_sampled": len(recent), "average_score": round(average, 1)},
     }
