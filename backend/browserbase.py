@@ -29,7 +29,15 @@ BACKOFF_CAP_S = 10.0
 
 # Below this many characters, a "successful" fetch is treated as empty rather
 # than trusted as real page content.
-MIN_CONTENT_CHARS = 200
+#
+# Measured: nature.com answers 200 with a 209-char JS-required shell, which
+# cleared the old 200-char threshold by nine characters and reached
+# verification as a real source - a citation then "passed" the substring check
+# while quoting a browser error message, because that text genuinely is in the
+# fetched markdown. Real articles here run 230,000+ chars (frontiersin 235,708,
+# ncbi 232,517), so anything under a kilobyte is an interstitial, not an
+# article, and is useless for quote verification even when it is genuine.
+MIN_CONTENT_CHARS = 1000
 
 # Interstitials that mean "we got a page, but not the article" split by what
 # they imply: a subscription wall vs. a bot/human check.
@@ -42,6 +50,10 @@ BLOCKED_PHRASES = (
     "enable javascript",
     "verify you are human",
     "access denied",
+    # nature.com's client-side shell. It never says "javascript" outright, so
+    # the phrase above misses it; matched on the fragment that avoids the
+    # apostrophe, whose encoding varies between fetches.
+    "required part of this site",
 )
 
 Failure = Literal["paywall", "blocked", "timeout", "not_found", "too_large", "empty"]

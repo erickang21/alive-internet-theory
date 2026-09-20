@@ -175,5 +175,38 @@ class FetchMarkdownTests(unittest.TestCase):
         self.assertIsNone(result.failure)
 
 
+class ErrorShellTests(unittest.TestCase):
+    """A 200 response carrying an interstitial instead of an article.
+
+    Observed live, not invented: nature.com returned exactly this at HTTP 200
+    in 209 characters. It cleared the old 200-char floor, was classified as a
+    usable source, and its text was then quoted back as a "verified" citation -
+    verification passed honestly, because the error message really was in the
+    fetched markdown. The guard has to reject the source, since nothing
+    downstream can tell a real quote from a quoted error page.
+    """
+
+    NATURE_SHELL = (
+        "A required part of this site couldn't load. This may be due to a "
+        "browser extension, network issues, or browser settings. Please check "
+        "your connection, disable any ad blockers, or try using a different "
+        "browser."
+    )
+
+    def test_the_real_nature_shell_is_blocked(self):
+        self.assertEqual(browserbase.classify_failure(200, self.NATURE_SHELL), "blocked")
+
+    def test_the_shell_is_long_enough_to_beat_a_length_check_alone(self):
+        # Pins WHY the phrase match is needed: this payload is not short enough
+        # for the size floor to have caught it under the old threshold.
+        self.assertGreater(len(self.NATURE_SHELL), 200)
+
+    def test_an_interstitial_under_the_floor_is_empty(self):
+        self.assertEqual(browserbase.classify_failure(200, "x" * 500), "empty")
+
+    def test_a_real_article_still_passes(self):
+        self.assertIsNone(browserbase.classify_failure(200, "word " * 5000))
+
+
 if __name__ == "__main__":
     unittest.main()
