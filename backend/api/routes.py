@@ -19,7 +19,7 @@ def _serve(evaluation: dict[str, Any]) -> dict[str, Any]:
     video_id = evaluation["video_id"]
     channel_id = evaluation.get("channel_id")
     siblings = (
-        EvaluationRepository().find_by_channel_id(channel_id, exclude_video_id=video_id)
+        EvaluationRepository().find_scores_by_channel_id(channel_id, exclude_video_id=video_id)
         if channel_id
         else []
     )

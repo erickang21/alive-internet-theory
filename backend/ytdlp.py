@@ -219,7 +219,9 @@ def _cut(path: Path, seconds: int) -> None:
     """Keep only the first `seconds` of a media file, copying the stream as is."""
     cut = path.with_name(f"{path.stem}.cut{path.suffix}")
     command = ["ffmpeg", "-y", "-v", "error", "-i", str(path), "-t", str(seconds)]
-    _ = subprocess.run([*command, "-c", "copy", str(cut)], check=True)
+    # A stream copy takes a fraction of a second; an ffmpeg that stalls on a
+    # truncated download would otherwise hold an analysis slot forever.
+    _ = subprocess.run([*command, "-c", "copy", str(cut)], check=True, timeout=60)
     _ = cut.replace(path)
 
 

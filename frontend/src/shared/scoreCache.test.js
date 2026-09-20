@@ -253,6 +253,34 @@ test("eviction ignores keys belonging to other features", async () => {
   assert.deepEqual(store["aitFactCheck:x"], { some: "record" });
 });
 
+test("eviction reads only score keys when getKeys exists, never the whole store", async () => {
+  const requestedKeys = [];
+  globalThis.chrome.storage.local.getKeys = async () => Object.keys(store);
+  const realGet = globalThis.chrome.storage.local.get;
+  globalThis.chrome.storage.local.get = async (key) => {
+    requestedKeys.push(key);
+    return realGet(key);
+  };
+  store["aitFactCheck:fat"] = { some: "record" };
+  for (let i = 0; i < SCORE_MAX_RECORDS + 3; i++) {
+    store[scoreKey(`v${i}`)] = rawRecord(`v${i}`, {
+      updatedAt: new Date(1000 + i * 1000).toISOString(),
+    });
+  }
+
+  await putCachedScore("newest", { score: 5, verdict: "ai_slop" });
+
+  assert.ok(!requestedKeys.includes(null), "get(null) must not run when getKeys exists");
+  for (const key of requestedKeys.filter(Array.isArray).flat()) {
+    assert.ok(key.startsWith("aitScore:"), `fetched a foreign key: ${key}`);
+  }
+  assert.equal(
+    Object.keys(store).filter((key) => key.startsWith("aitScore:")).length,
+    SCORE_MAX_RECORDS,
+  );
+  assert.deepEqual(store["aitFactCheck:fat"], { some: "record" });
+});
+
 test("eviction runs before the write, so a full store can still be written to", async () => {
   for (let i = 0; i < SCORE_MAX_RECORDS + 3; i++) {
     store[scoreKey(`v${i}`)] = rawRecord(`v${i}`, {
