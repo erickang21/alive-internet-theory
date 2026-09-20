@@ -21,54 +21,11 @@ const THUMB_POSITIONED_CLASS = "ait-thumb-positioned";
 const HIDDEN_CLASS = "ait-filtered-hidden";
 const BADGE_CLASS = "ait-flag-badge";
 const INLINE_CLASS = "ait-flag-inline";
-const STYLE_ID = "ait-filter-style";
 
-// build.js does not copy filter.css into dist (see the note at the top of that file),
-// and this agent is scoped out of editing build.js/manifest.json to register it there.
-// As a stopgap this is an inline copy of filter.css, injected once as a <style> tag so
-// the feature works without a build change. Keep this string in sync with filter.css.
-const FILTER_CSS = `
-.ait-filtered-hidden {
-  display: none !important;
-}
-.ait-thumb-positioned {
-  position: relative;
-}
-.ait-flag-badge {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  z-index: 9999;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: #4c1a1a;
-  color: #ff7b72;
-  font-family: "Roboto", "Segoe UI", sans-serif;
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1.4;
-  white-space: nowrap;
-  pointer-events: none;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
-}
-.ait-flag-inline {
-  display: inline-block;
-  margin-left: 6px;
-  color: #ff7b72;
-  font-size: 12px;
-  vertical-align: middle;
-}
-`;
-
-function ensureStyleInjected() {
-  if (typeof document === "undefined" || typeof document.getElementById !== "function") return;
-  if (document.getElementById(STYLE_ID)) return;
-  const style = document.createElement("style");
-  style.id = STYLE_ID;
-  style.textContent = FILTER_CSS;
-  const target = document.head || document.documentElement || document.body;
-  target?.appendChild(style);
-}
+// filter.css ships as a real content-script stylesheet now (build.js copies
+// every src/content/*.css into dist/, and the manifest registers it), so this
+// module no longer injects an inline copy of it - see git history for the
+// FILTER_CSS workaround this replaced.
 
 function isFilterable(score) {
   return typeof score === "number" && !Number.isNaN(score) && score < AI_FILTER_THRESHOLD;
@@ -112,8 +69,6 @@ function decorateBlock(tile) {
 
 // tilesWithScores: [{ tile, videoId, score }] — score is a number or null.
 export function applyFilter(state, tilesWithScores) {
-  ensureStyleInjected();
-
   for (const entry of tilesWithScores ?? []) {
     const tile = entry?.tile;
     if (!tile) continue;
@@ -132,8 +87,8 @@ export function applyFilter(state, tilesWithScores) {
 }
 
 // Restores root's subtree exactly to its pre-filter state: every injected ait- node,
-// the positioning helper class, the hidden class, the marker attribute, and the
-// injected <style> tag are all removed.
+// the positioning helper class, the hidden class, and the marker attribute are all
+// removed.
 export function clearFilter(root = document) {
   const marked = Array.from(root.querySelectorAll?.(`[${APPLIED_ATTR}]`) ?? []);
   for (const tile of marked) {
@@ -154,9 +109,5 @@ export function clearFilter(root = document) {
   }
   for (const el of root.querySelectorAll?.(`[${APPLIED_ATTR}]`) ?? []) {
     el.removeAttribute?.(APPLIED_ATTR);
-  }
-
-  if (typeof document !== "undefined") {
-    document.getElementById?.(STYLE_ID)?.remove();
   }
 }

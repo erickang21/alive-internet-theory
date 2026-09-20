@@ -1,5 +1,6 @@
 import { build, context } from "esbuild";
-import { cpSync } from "node:fs";
+import { cpSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 
 const watch = process.argv.includes("--watch");
 
@@ -15,8 +16,17 @@ const options = {
   target: "chrome120",
 };
 
+// Every stylesheet the content script uses lives in src/content/ (overlay.css,
+// filter.css, factCheckCard.css, and whatever gets added next) - copy the
+// whole directory's .css files instead of hardcoding filenames one at a time,
+// which is what let filter.css silently never reach dist/ before.
+const CONTENT_CSS_DIR = "src/content";
+
 const copyStatic = () => {
-  cpSync("src/content/overlay.css", "dist/overlay.css");
+  const cssFiles = readdirSync(CONTENT_CSS_DIR).filter((name) => name.endsWith(".css"));
+  for (const name of cssFiles) {
+    cpSync(join(CONTENT_CSS_DIR, name), join("dist", name));
+  }
 };
 
 if (watch) {

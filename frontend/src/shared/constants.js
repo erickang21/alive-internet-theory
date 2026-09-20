@@ -15,6 +15,11 @@ export const MESSAGE_TYPES = {
   // handled only because `undefined !== undefined` is false.
   GET_EVALUATIONS: "ait:get-evaluations",
   SET_FILTER_STATE: "ait:set-filter-state",
+  // Progressive fact-check bridge (content script -> background -> backend).
+  // Content scripts run on youtube.com, and the manifest's host permission is
+  // scoped to 127.0.0.1:5000 only, so the fetch has to go through the
+  // background worker, same as REQUEST_EVALUATION/GET_EVALUATIONS above.
+  GET_FACT_CHECK: "ait:get-fact-check",
 };
 
 // Tri-state AI video filter. Cycle order for the sidebar's single-button

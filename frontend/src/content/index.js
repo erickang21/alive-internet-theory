@@ -1,6 +1,7 @@
 import { MESSAGE_TYPES } from "../shared/constants.js";
 import { getFilterState, subscribeFilterState } from "../shared/filterState.js";
 import { getCachedScores } from "../shared/scoreCache.js";
+import { mountFactCheckFor, unmountFactCheck } from "./factCheckMount.js";
 import { applyFilter, clearFilter } from "./filterRenderer.js";
 import { extractVideoId, findVideoTiles, observeVideoTiles } from "./videoScanner.js";
 import {
@@ -169,6 +170,7 @@ async function showCurrentVideo() {
   if (!videoId) {
     stopPolling();
     currentVideoId = null;
+    unmountFactCheck();
     removeOverlay();
     return;
   }
@@ -177,6 +179,13 @@ async function showCurrentVideo() {
   currentVideoId = videoId;
 
   renderLoading();
+  // Independent of the AI-score poll below: that poll stops the moment a
+  // score renders (see poll()/showEvaluation() and factCheckBridge.js's
+  // module comment for why), but the fact-check for the same video can still
+  // be minutes away. mountFactCheckFor tears down any previous video's card,
+  // subscription and poll timer before starting this one's, so a fast
+  // navigation never leaves a stale bridge writing records for the old video.
+  mountFactCheckFor(videoId);
   await poll(videoId);
 }
 

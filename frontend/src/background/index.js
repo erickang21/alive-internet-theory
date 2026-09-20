@@ -40,6 +40,57 @@ async function storedEvaluation(videoId) {
   return response.json();
 }
 
+// --- GET_FACT_CHECK: the progressive fact-check bridge ------------------------------
+//
+// GET /video/fact-check?video_id= only ever returns the stored ValidityReport
+// (200) or 404 (backend/api/routes.py::_fact_check_report reads nothing but
+// evidence.report). That 404 is ambiguous by itself: it's the same response
+// whether the video hasn't been analyzed at all yet, the analysis finished but
+// the pre-gate ruled it ineligible (backend/scoring/fact_check.py's
+// _pregate_skipped_entry never writes a report), or the fact-check criterion
+// was skipped for some other reason (e.g. no usable LLM credentials). Only a
+// report existing is unambiguous, so a 404 there falls back to the already
+// read-only, side-effect-free GET /video/evaluation to look for
+// evidence.pregate on the fact_check breakdown entry - present (with
+// isEligible false) only on the pre-gate skip path per that module.
+async function fetchFactCheckReport(videoId) {
+  const url = `${API_BASE_URL}/video/fact-check?video_id=${encodeURIComponent(videoId)}`;
+  const response = await fetch(url);
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`Backend returned ${response.status}`);
+  return response.json();
+}
+
+function pregateFromEvaluation(evaluation) {
+  const entry = (evaluation?.breakdown ?? []).find((item) => item?.criterion === "fact_check");
+  return entry?.evidence?.pregate ?? null;
+}
+
+async function getFactCheckStatus(videoId) {
+  const report = await fetchFactCheckReport(videoId);
+  if (report) return { stage: "complete", report };
+
+  const evaluation = await storedEvaluation(videoId);
+  const pregate = evaluation ? pregateFromEvaluation(evaluation) : null;
+  if (pregate && pregate.isEligible === false) {
+    return { stage: "skipped_fiction", pregate };
+  }
+  // Either not analyzed yet, or analyzed but the fact-check criterion has
+  // nothing to show for a reason other than the pre-gate (e.g. no usable
+  // LLM credentials) - the frozen FACT_CHECK_STAGES contract has no separate
+  // "permanently skipped" stage, so both read as "still working".
+  return { stage: "fact_checking" };
+}
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type !== MESSAGE_TYPES.GET_FACT_CHECK) return false;
+
+  getFactCheckStatus(message.videoId)
+    .then((result) => sendResponse({ ok: true, ...result }))
+    .catch((error) => sendResponse({ ok: false, error: String(error) }));
+  return true;
+});
+
 // --- GET_EVALUATIONS: batch score lookup for the tile-grid AI filter ----------------
 //
 // There is no backend batch endpoint yet — the API only exposes

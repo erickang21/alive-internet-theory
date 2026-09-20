@@ -309,7 +309,6 @@ describe("clearFilter", () => {
       // Sanity: decoration is actually present before clearing.
       assert.ok(doc.body.querySelectorAll(".ait-flag-badge, .ait-flag-inline").length > 0);
       assert.ok(doc.body.querySelectorAll(".ait-filtered-hidden").length > 0);
-      assert.ok(doc.getElementById("ait-filter-style"));
 
       clearFilter();
 
@@ -317,7 +316,6 @@ describe("clearFilter", () => {
       assert.equal(doc.body.querySelectorAll(".ait-filtered-hidden").length, 0);
       assert.equal(doc.body.querySelectorAll(".ait-thumb-positioned").length, 0);
       assert.equal(doc.body.querySelectorAll("[data-ait-filter-applied]").length, 0);
-      assert.equal(doc.getElementById("ait-filter-style"), null);
     });
   });
 
