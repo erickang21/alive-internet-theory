@@ -46,7 +46,7 @@ def _safe(
             "criterion": criterion_name,
             "deduction": 0,
             "applied": False,
-            "detail": "Criterion unavailable (upstream error).",
+            "reason": "upstream_error",
         }
 
 
@@ -60,7 +60,9 @@ def _run(
     result = _safe(criterion_name, fn, *args, **kwargs)
     deduction = result["deduction"]
     outcome = ("-" + str(deduction) if deduction else "0") if result["applied"] else "n/a"
-    logger.info("score: %s %s, %s", criterion_name, outcome, result["detail"])
+    # The breakdown carries fields now, not prose, so the log says what it was given.
+    note = result.get("reason") or result.get("evidence") or ""
+    logger.info("score: %s %s, %s", criterion_name, outcome, note)
     return result
 
 

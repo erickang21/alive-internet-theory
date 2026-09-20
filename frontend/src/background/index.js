@@ -2,6 +2,10 @@ import { API_BASE_URL, MESSAGE_TYPES } from "../shared/constants.js";
 import { setIndicator } from "./indicator.js";
 import { getScores } from "./scores.js";
 
+// A request that never settles never calls sendResponse, leaving the content script
+// waiting for an answer that cannot arrive.
+const REQUEST_TIMEOUT_MS = 20_000;
+
 const HANDLERS = {
   [MESSAGE_TYPES.REQUEST_EVALUATION]: ({ videoId }, tabId) => requestEvaluation(videoId, tabId),
   [MESSAGE_TYPES.RERUN_EVALUATION]: ({ videoId }, tabId) => requestEvaluation(videoId, tabId, true),
@@ -32,6 +36,7 @@ async function requestEvaluation(videoId, tabId, force = false) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ video_id: videoId, force }),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!response.ok && response.status !== 202) {
     throw new Error(`Backend returned ${response.status}`);
@@ -50,6 +55,7 @@ async function submitVote({ videoId, voterId, vote }) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ video_id: videoId, voter_id: voterId, vote }),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!response.ok) {
     throw new Error(`Backend returned ${response.status}`);

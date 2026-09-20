@@ -2,6 +2,9 @@ import { API_BASE_URL } from "../shared/constants.js";
 
 const MAX_CONCURRENT_LOOKUPS = 4;
 const MISS_TTL_MS = 60_000;
+// Without this a hung request keeps its slot for good, and four of them deadlock the
+// queue for the rest of the session.
+const REQUEST_TIMEOUT_MS = 10_000;
 
 // A stored score never changes under us, but a video that isn't analyzed yet can be
 // minutes later, so only misses expire.
@@ -40,6 +43,7 @@ function scoreFor(videoId) {
 async function fetchScore(videoId) {
   const response = await fetch(
     `${API_BASE_URL}/video/evaluation?video_id=${encodeURIComponent(videoId)}`,
+    { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) },
   );
   if (!response.ok) return null;
   return (await response.json()).score ?? null;

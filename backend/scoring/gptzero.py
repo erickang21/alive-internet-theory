@@ -50,7 +50,8 @@ def score_transcript(transcript: str, cues: list[Cue] | None = None) -> dict[str
             "criterion": "gptzero_transcript",
             "deduction": 0,
             "applied": False,
-            "detail": f"Transcript too short for a reliable verdict ({word_count} words).",
+            "reason": "transcript_too_short",
+            "evidence": {"word_count": word_count, "words_needed": MIN_WORDS_FOR_SIGNAL},
         }
 
     prediction = predict_text(transcript)
@@ -68,14 +69,10 @@ def score_transcript(transcript: str, cues: list[Cue] | None = None) -> dict[str
         "criterion": "gptzero_transcript",
         "deduction": deduction,
         "applied": True,
-        "detail": (
-            f"GPTZero verdict: {prediction.get('predicted_class', 'unknown')} "
-            f"(confidence {confidence:.2f})."
-        ),
         "evidence": {
             "predicted_class": prediction.get("predicted_class"),
             "confidence_score": confidence,
-            "class_probabilities": probabilities,
+            "ai_probability": probabilities.get("ai", 0.0),
             "flagged_sentence_ratio": round(flagged / len(sentences), 3) if sentences else None,
             "flagged_sentences": _flagged_phrases(sentences, cues or []),
         },

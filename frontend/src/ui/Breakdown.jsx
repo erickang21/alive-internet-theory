@@ -1,55 +1,139 @@
 import { useState } from "react";
 import styled from "styled-components";
 
+import { count, days, hours, number, percent } from "./format.js";
 import { bodyText, focusRing, smallText } from "./primitives.jsx";
 
 const MAX_PHRASES = 3;
-const WIDE_VALUE_CHARS = 40;
-const GPTZERO_CLASSES = { ai: "AI", human: "Human", mixed: "Mixed" };
 
+function Service({ href, children }) {
+  return (
+    <ServiceLink href={href} target="_blank" rel="noopener noreferrer">
+      {children}
+    </ServiceLink>
+  );
+}
+
+// The backend sends fields; the wording lives here, so a value is phrased one way and
+// the summary can never drift from the rows beneath it. Rows carry only what the
+// summary doesn't already say.
 const CRITERIA = {
   gptzero_transcript: {
     name: "Transcript analysis",
+    summary: ({ predicted_class: verdict, confidence_score: confidence }) =>
+      `Reads as ${WRITING[verdict] ?? "unclear"} writing${confident(confidence)}.`,
+    about: (
+      <>
+        <Service href="https://gptzero.me">GPTZero</Service> reads the transcript and rates how much
+        of it was written by a language model, sentence by sentence. It judges the words, not the
+        voice reading them.
+      </>
+    ),
     rows: (evidence) => [
-      ["Verdict", GPTZERO_CLASSES[evidence.predicted_class] ?? evidence.predicted_class],
-      ["Confidence", percent(evidence.confidence_score)],
-      ["AI probability", percent(evidence.class_probabilities?.ai)],
+      ["AI probability", percent(evidence.ai_probability)],
       ["Flagged sentences", percent(evidence.flagged_sentence_ratio)],
-    ],
-  },
-  filler_words: {
-    name: "Filler words",
-    rows: (evidence) => [
-      ["Fillers found", number(evidence.filler_count)],
-      ["Filler rate", number(evidence.rate_per_100_words, " per 100 words")],
-    ],
-  },
-  upload_pattern: {
-    name: "Upload history",
-    rows: (evidence) => [
-      ["Median gap between uploads", gap(evidence.median_gap_hours)],
-      ["Uploads sampled", number(evidence.uploads_sampled)],
-    ],
-  },
-  account_age: {
-    name: "Channel creation date",
-    rows: (evidence) => [["Oldest upload", age(evidence.oldest_upload_age_days)]],
-  },
-  channel_history: {
-    name: "Similar videos",
-    rows: (evidence) => [
-      ["Videos sampled", number(evidence.videos_sampled)],
-      ["Average score", number(evidence.average_score, " / 100")],
     ],
   },
   elevenlabs_voice: {
     name: "Text-to-speech likelihood",
-    rows: (evidence) => [["ElevenLabs voice", percent(evidence.probability)]],
+    summary: ({ probability }, deduction) =>
+      deduction > 0
+        ? `An ElevenLabs voice reads this, ${percent(probability)} match.`
+        : `No ElevenLabs voice here, ${percent(probability)} match. Other AI voices aren't covered.`,
+    about: (
+      <>
+        <Service href="https://elevenlabs.io">ElevenLabs</Service> listens to the first minute and
+        reports whether the narration is one of its own synthetic voices. It cannot hear any other
+        vendor&apos;s, so a miss proves little.
+      </>
+    ),
   },
+  filler_words: {
+    name: "Filler words",
+    summary: (evidence, deduction) =>
+      deduction > 0
+        ? "Too few stumbles and hesitations for real speech."
+        : "Stumbles and hesitations at a natural rate for real speech.",
+    about: (
+      <>
+        Counts the &ldquo;um&rdquo;s, &ldquo;uh&rdquo;s and false starts in the captions. People
+        leave them everywhere; a script read aloud has almost none.
+      </>
+    ),
+    rows: (evidence) => [
+      ["Fillers found", count(evidence.filler_count, "filler")],
+      ["Rate", number(evidence.rate_per_100_words, " per 100 words")],
+    ],
+  },
+  upload_pattern: {
+    name: "Upload history",
+    summary: (evidence) => `A new video roughly every ${hours(evidence.median_gap_hours)}.`,
+    about: (
+      <>
+        Measures the typical gap between this channel&apos;s uploads. A person&apos;s pace varies; a
+        farm posts on a clock.
+      </>
+    ),
+    rows: (evidence) => [["Videos sampled", number(evidence.uploads_sampled)]],
+  },
+  account_age: {
+    name: "Channel creation date",
+    summary: (evidence) =>
+      `The channel's oldest video is ${days(evidence.oldest_upload_age_days)} old.`,
+    about: (
+      <>
+        Dates the channel by its oldest public video, because YouTube does not publish when a
+        channel was created. A channel that sat empty first will read younger than it is.
+      </>
+    ),
+  },
+  channel_history: {
+    name: "Similar videos",
+    summary: (evidence) =>
+      `${count(evidence.videos_sampled, "other video")} from this channel average ${number(evidence.average_score)} out of 100.`,
+    about: (
+      <>
+        Averages the other videos from this channel that have already been analyzed, so a track
+        record counts for or against a new upload.
+      </>
+    ),
+  },
+};
+
+const WRITING = { human: "human", ai: "AI", mixed: "part human, part AI" };
+
+// Why a criterion had nothing to say. Kept apart from the criteria themselves because
+// several share the same reason.
+const REASONS = {
+  transcript_too_short: (e) =>
+    `The transcript is too short to judge \u2014 ${count(e.word_count, "word")}, and this needs ${e.words_needed}.`,
+  needs_auto_captions: () =>
+    "Only YouTube's auto-captions keep the stumbles this looks for; these captions were written.",
+  too_few_uploads: () => "The channel has too few videos to show a pattern.",
+  no_uploads: () => "The channel has no public videos to date it by.",
+  no_siblings: () => "No other videos from this channel have been analyzed yet.",
+  no_audio: () => "There was no audio to listen to.",
+  no_credentials: () => "Skipped: no usable Anthropic credentials.",
+  not_educational: () => "Nothing here states checkable facts, so there was nothing to check.",
+  upstream_error: () => "This check couldn't run.",
 };
 
 // The fact check isn't scored, so the breakdown leaves it out.
 const HIDDEN = new Set(["fact_check"]);
+
+function confident(confidence) {
+  if (!Number.isFinite(confidence) || confidence >= 0.9) return "";
+  return confidence >= 0.6 ? ", though not certainly" : ", but it is unsure";
+}
+
+/** The one line under a criterion: its finding, or why it had none. */
+function summarise(item, config) {
+  const evidence = item.evidence ?? {};
+  if (item.reason) return REASONS[item.reason]?.(evidence) ?? null;
+  if (item.applied && config.summary) return config.summary(evidence, item.deduction);
+  // Evaluations stored before the backend sent fields still carry their own sentence.
+  return item.detail ?? null;
+}
 
 const List = styled.ol`
   margin: 0;
@@ -130,10 +214,31 @@ const Label = styled.dt`
   color: var(--ait-text-secondary);
 `;
 
+const About = styled.p`
+  /* Flush with the rule above it, so its first letter lines up with the line. */
+  margin: 0 0 var(--ait-space-2) 11px;
+  color: var(--ait-text-secondary);
+  ${smallText}
+`;
+
+const ServiceLink = styled.a`
+  color: var(--ait-cta);
+  text-decoration: underline;
+
+  &:hover {
+    text-decoration-thickness: 2px;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--ait-text);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+`;
+
 const Value = styled.dd`
   margin: 0;
   ${bodyText}
-  text-align: ${(props) => (props.$wide ? "left" : "right")};
   overflow-wrap: anywhere;
 `;
 
@@ -146,9 +251,7 @@ const Rows = styled.dl`
 
 const Pair = styled.div`
   display: flex;
-  flex-direction: ${(props) => (props.$wide ? "column" : "row")};
-  justify-content: space-between;
-  gap: ${(props) => (props.$wide ? "0" : "var(--ait-space-4)")};
+  gap: var(--ait-space-1);
 `;
 
 const PhraseList = styled.ul`
@@ -223,6 +326,7 @@ export function Breakdown({ evaluation }) {
         const config = CRITERIA[item.criterion] ?? {};
         const evidence = item.evidence ?? {};
         const [text, tone] = points(item);
+        const summary = summarise(item, config);
         const expanded = open === index;
         return (
           <li key={item.criterion}>
@@ -236,11 +340,14 @@ export function Breakdown({ evaluation }) {
               <Points $tone={tone}>{text}</Points>
             </Toggle>
             {expanded && (
-              <Details>
-                {item.detail && <Detail>{item.detail}</Detail>}
-                <Phrases sentences={evidence.flagged_sentences} />
-                <RowList entries={config.rows?.(evidence) ?? []} />
-              </Details>
+              <>
+                <Details>
+                  {summary && <Detail>{summary}</Detail>}
+                  <Phrases sentences={evidence.flagged_sentences} />
+                  <RowList entries={config.rows?.(evidence) ?? []} />
+                </Details>
+                {config.about && <About>{config.about}</About>}
+              </>
             )}
           </li>
         );
@@ -290,15 +397,12 @@ function RowList({ entries }) {
   if (!rows.length) return null;
   return (
     <Rows>
-      {rows.map(([label, value]) => {
-        const wide = String(value).length > WIDE_VALUE_CHARS;
-        return (
-          <Pair key={label} $wide={wide}>
-            <Label>{label}</Label>
-            <Value $wide={wide}>{value}</Value>
-          </Pair>
-        );
-      })}
+      {rows.map(([label, value]) => (
+        <Pair key={label}>
+          <Label>{label}:</Label>
+          <Value>{value}</Value>
+        </Pair>
+      ))}
     </Rows>
   );
 }
@@ -308,23 +412,6 @@ function points({ applied, deduction }) {
   if (deduction > 0) return [`−${number(deduction)}`, "slop"];
   if (deduction < 0) return [`+${number(-deduction)}`, "human"];
   return ["0", "text-secondary"];
-}
-
-function number(value, suffix = "") {
-  return Number.isFinite(value) ? `${Math.round(value * 10) / 10}${suffix}` : null;
-}
-
-function percent(value) {
-  return Number.isFinite(value) ? `${Math.round(value * 100)}%` : null;
-}
-
-function gap(hours) {
-  return hours > 48 ? number(hours / 24, " days") : number(hours, " h");
-}
-
-function age(days) {
-  if (!Number.isFinite(days)) return null;
-  return days < 365 ? `${days} days ago` : number(days / 365, " years ago");
 }
 
 function timestamp(seconds) {

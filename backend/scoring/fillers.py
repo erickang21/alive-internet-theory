@@ -30,7 +30,8 @@ def score_transcript(transcript: str, track_kind: str | None) -> dict[str, Any]:
             "criterion": "filler_words",
             "deduction": 0,
             "applied": False,
-            "detail": "Skipped: only reliable on auto-generated (ASR) caption tracks.",
+            "reason": "needs_auto_captions",
+            "evidence": {"track_kind": track_kind},
         }
 
     word_count = len(transcript.split())
@@ -39,26 +40,28 @@ def score_transcript(transcript: str, track_kind: str | None) -> dict[str, Any]:
             "criterion": "filler_words",
             "deduction": 0,
             "applied": False,
-            "detail": f"Transcript too short to judge filler absence ({word_count} words).",
+            "reason": "transcript_too_short",
+            "evidence": {"word_count": word_count, "words_needed": MIN_WORDS_FOR_SIGNAL},
         }
 
     filler_count = count_fillers(transcript)
     rate = filler_count / word_count * 100
     if rate >= HUMAN_FILLER_RATE_PER_100_WORDS:
         deduction = -5.0
-        detail = f"Natural filler rate ({rate:.2f} per 100 words) — reads as human speech."
     else:
         # Absence is weaker evidence than presence, so scale by transcript length:
         # ASR drops some fillers, and short-ish transcripts amplify that noise.
         shortfall = 1 - rate / HUMAN_FILLER_RATE_PER_100_WORDS
         length_confidence = min(word_count / FULL_CONFIDENCE_WORDS, 1.0)
         deduction = round(MAX_DEDUCTION * shortfall * length_confidence, 1)
-        detail = f"Suspiciously few fillers ({rate:.2f} per 100 words) for spoken audio."
 
     return {
         "criterion": "filler_words",
         "deduction": deduction,
         "applied": True,
-        "detail": detail,
-        "evidence": {"filler_count": filler_count, "rate_per_100_words": round(rate, 2)},
+        "evidence": {
+            "filler_count": filler_count,
+            "rate_per_100_words": round(rate, 2),
+            "human_rate_per_100_words": HUMAN_FILLER_RATE_PER_100_WORDS,
+        },
     }

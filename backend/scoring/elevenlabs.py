@@ -34,7 +34,7 @@ def score_audio(audio_path: Path | None) -> dict[str, Any]:
             "criterion": "elevenlabs_voice",
             "deduction": 0,
             "applied": False,
-            "detail": "Skipped: no audio available for the voice check.",
+            "reason": "no_audio",
         }
 
     probability = classify_audio(audio_path)
@@ -45,9 +45,6 @@ def score_audio(audio_path: Path | None) -> dict[str, Any]:
             "applied": True,
             # Never a bonus: the classifier only knows ElevenLabs voices, so every other
             # synthetic voice reads exactly like a real person here.
-            "detail": (
-                f"No ElevenLabs voice detected ({probability:.0%}); other AI voices aren't covered."
-            ),
             "evidence": {"probability": round(probability, 4)},
         }
 
@@ -58,6 +55,5 @@ def score_audio(audio_path: Path | None) -> dict[str, Any]:
         "criterion": "elevenlabs_voice",
         "deduction": round(MAX_DEDUCTION * confidence, 1),
         "applied": True,
-        "detail": f"ElevenLabs voice detected ({probability:.0%} probability).",
         "evidence": {"probability": round(probability, 4)},
     }

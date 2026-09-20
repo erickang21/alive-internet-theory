@@ -8,6 +8,9 @@ import { hideCard, showCard } from "./mount.js";
 // backend on the same tick.
 const POLL_INTERVAL_MS = 5_000;
 const POLL_JITTER_MS = 2_000;
+// A service worker torn down mid-message can leave sendMessage pending for good, and a
+// poll that never settles never schedules the next one.
+const REPLY_TIMEOUT_MS = 25_000;
 
 let currentVideoId = null;
 let pollTimer = null;
@@ -46,6 +49,15 @@ async function rerunCurrentVideo() {
   if (videoId === currentVideoId) await poll(videoId);
 }
 
+function ask(message) {
+  return Promise.race([
+    chrome.runtime.sendMessage(message),
+    new Promise((_resolve, reject) =>
+      setTimeout(() => reject(new Error("the service worker never answered")), REPLY_TIMEOUT_MS),
+    ),
+  ]);
+}
+
 // sendMessage throws synchronously once the extension is reloaded under an open tab,
 // which would otherwise take the rest of the navigation down with it.
 function send(message) {
@@ -73,10 +85,7 @@ async function poll(videoId, first = false) {
  * is watching arrives with the rainbow ring. */
 async function showEvaluation(videoId, first) {
   try {
-    const response = await chrome.runtime.sendMessage({
-      type: MESSAGE_TYPES.REQUEST_EVALUATION,
-      videoId,
-    });
+    const response = await ask({ type: MESSAGE_TYPES.REQUEST_EVALUATION, videoId });
 
     if (videoId !== currentVideoId) return true;
     if (!response?.ok) {
@@ -104,7 +113,10 @@ async function showEvaluation(videoId, first) {
 
 // YouTube is an SPA: yt-navigate-finish fires on every in-app navigation,
 // including the initial load in most cases; the direct call covers the rest.
+// yt-navigate-finish covers in-app navigation; yt-page-data-updated lands later and
+// catches the times it fires before location has caught up.
 document.addEventListener("yt-navigate-finish", showCurrentVideo);
+document.addEventListener("yt-page-data-updated", showCurrentVideo);
 document.addEventListener(RERUN_EVENT, rerunCurrentVideo);
 showCurrentVideo();
 initFilter();
