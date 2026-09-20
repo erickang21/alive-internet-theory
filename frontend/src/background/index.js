@@ -11,6 +11,7 @@ const HANDLERS = {
   [MESSAGE_TYPES.RERUN_EVALUATION]: ({ videoId }, tabId) => requestEvaluation(videoId, tabId, true),
   [MESSAGE_TYPES.SUBMIT_VOTE]: submitVote,
   [MESSAGE_TYPES.GET_EVALUATIONS]: getScores,
+  [MESSAGE_TYPES.GET_FACT_CHECK]: ({ videoId }) => getFactCheckStatus(videoId),
   [MESSAGE_TYPES.CLEAR_INDICATOR]: async (_message, tabId) => setIndicator(tabId, "idle"),
   [MESSAGE_TYPES.QUEUE_ANALYSIS]: ({ videoId }) => queueAnalysis(videoId),
 };
@@ -84,4 +85,30 @@ async function submitVote({ videoId, voterId, vote }) {
     throw new Error(`Backend returned ${response.status}`);
   }
   return response.json();
+}
+
+// GET /video/fact-check?video_id= discriminates the states itself: 404 means
+// no evaluation row at all (still indexing, so keep polling); a 200 carries
+// either the bare ValidityReport dict (no top-level "status" key, so the
+// shapes can't collide), {status: "skipped", pregate} for a video the
+// pre-gate genuinely classified as not fact-checkable, or
+// {status: "unavailable", detail} when the check couldn't run (no LLM
+// credentials, classifier down, a failed check). "unavailable" maps to the
+// bridge's terminal "failed" stage rather than "fact_checking": the state is
+// remembered in the row until a --force rerun, so polling it again cannot
+// change the answer.
+async function getFactCheckStatus(videoId) {
+  const url = `${API_BASE_URL}/video/fact-check?video_id=${encodeURIComponent(videoId)}`;
+  const response = await fetch(url, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+  if (response.status === 404) return { stage: "fact_checking" };
+  if (!response.ok) throw new Error(`Backend returned ${response.status}`);
+
+  const body = await response.json();
+  if (body?.status === "skipped") {
+    return { stage: "skipped_fiction", pregate: body.pregate ?? null };
+  }
+  if (body?.status === "unavailable") {
+    return { stage: "failed", detail: body.detail ?? null };
+  }
+  return { stage: "complete", report: body };
 }

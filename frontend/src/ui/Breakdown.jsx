@@ -60,7 +60,8 @@ const CRITERIA = {
     ],
     about: (
       <>
-        Natural speech often contains filler words like "um" and "like", with speakers on average using 3-5 fillers for every 100 words.
+        Natural speech often contains filler words like &quot;um&quot; and &quot;like&quot;, with
+        speakers on average using 3-5 fillers for every 100 words.
       </>
     ),
   },

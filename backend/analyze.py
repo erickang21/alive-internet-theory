@@ -51,10 +51,16 @@ def analyze_video(video_id: str) -> dict[str, Any] | None:
             video_length_seconds=int(info.get("duration") or 0),
             cues=transcript.get("cues"),
             audio_path=audio_path,
+            title=info.get("title"),
+            description=info.get("description"),
+            categories=info.get("categories"),
         )
     finally:
         if temporary_audio and audio_path:
             audio_path.unlink(missing_ok=True)
+    # The analyzed text itself, so `python -m backend.factcheck <id>` can re-run
+    # the fact check without --transcript (it reads this key back).
+    evaluation["transcript"] = transcript["text"]
     timestamp = info.get("timestamp")
     evaluation["metadata"] = {
         "title": info.get("title"),

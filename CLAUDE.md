@@ -16,7 +16,9 @@ backend/analyze.py         CLI: resolve targets → download → transcript → 
 backend/ytdlp.py           All YouTube access (target expansion, downloads, channel uploads + 24h cache)
 backend/transcripts.py     Caption parsing (json3/vtt), faster-whisper fallback
 backend/scoring/           Scoring engine (starts at 100, deducts per AI evidence) + per-criterion modules
-backend/api/               Flask API: GET/POST /video/evaluation, POST /video/community-vote, background indexing
+backend/factcheck/         Claim extraction → web evidence → verification → Validity Score
+backend/browserbase.py     All web access (Browserbase search + fetch, markdown)
+backend/api/               Flask API: GET/POST /video/evaluation, GET /video/fact-check, POST /video/community-vote, background indexing
 backend/database/          SQLAlchemy models + repositories on SQLite, Alembic migrations
 ```
 
@@ -35,8 +37,9 @@ React 18 + styled-components, bundled by esbuild (`jsx: "automatic"`, minified, 
 - **`ui/hooks.js`**: `useVote` (tally, selection, submit, the memoized anonymous `voterId`, and the per-video `vote:<id>` key), `useFilterState`, `useDebugMode`, `useDismiss`.
 - **`content/mount.js`**: the one imperative piece left. It keeps a `[data-ait-mount]` container (`display: contents`, so the card itself is the flow element) anchored above `#donation-shelf`/`#related` using the anchor's own parent, since YouTube moves both into `#below` in single-column layouts, and re-anchors from a rAF-coalesced `MutationObserver`. Shorts have no side column, so the card floats top-right there.
 - **`content/index.jsx`**: polling and mounting, as a three-state swap in one mount point. The skeleton goes up with the page (`showSkeleton`) because the request goes out with it; `indexing` keeps it there, an evaluation replaces it with the card, and anything else — a `failed` status, an unreachable backend, a dead service worker — replaces it with `ErrorCard`, because a skeleton with nothing behind it is a lie. A transport error keeps polling, so a backend that comes back puts the skeleton up again on its own; a `failed` status does not, since the backend remembers it until it restarts. **Silence is an error too**: a request that hasn't answered within `SILENCE_MS` (2s) swaps the skeleton for the error container without touching the request, because the route only reads SQLite and spawns a thread, so a healthy backend is never near that. It's a display deadline, not a timeout — the 20s fetch timeout and the 25s reply timeout still bound the request itself, and whatever it finally answers replaces the error. `restart(force)` re-runs from the skeleton up and serves both the error container's retry and debug mode's re-analyze.
-- **Feed filter** (`content/filter.js`, `videoScanner.js`, `filterRenderer.js`, `shared/filterState.js`, `background/scores.js`): stays imperative, because it decorates YouTube's own tiles rather than rendering our own tree. `chrome.storage.local["aitFilterState"]` is the source of truth, so the filter applies on load, on navigation and on storage changes with no UI open. With flags on, an AI-leaning tile is marked and a likely-human one is left untouched, since labelling what you do want doubles the noise for nothing. The thumbnail darkens behind a corner pill — 50% for **Heavy AI Use** with a warning triangle, 30% for **Likely AI** with a question mark — so the title and channel keep full contrast and the two bands separate before the label is read. A hidden note beside the title carries the verdict for screen readers, since the mark is visual only. Bands use the backend's thresholds. "Remove" hides only the Heavy AI Use band (`AI_FILTER_THRESHOLD`). An unanalyzed tile (`null` score) always renders normally. Scores come from `GET /video/evaluation` (never POST: browsing a feed must not queue its tiles for indexing), fanned out 4 at a time with a cache where only misses expire.
+- **Feed filter** (`content/filter.js`, `videoScanner.js`, `filterRenderer.js`, `shared/filterState.js`, `background/scores.js`): stays imperative, because it decorates YouTube's own tiles rather than rendering our own tree. `chrome.storage.local["aitFilterState"]` is the source of truth, so the filter applies on load, on navigation and on storage changes with no UI open. With flags on, an AI-leaning tile is marked and a likely-human one is left untouched, since labelling what you do want doubles the noise for nothing. The thumbnail darkens behind a corner pill — 50% for **Heavy AI Use** with a warning triangle, 30% for **Likely AI** with a question mark — so the title and channel keep full contrast and the two bands separate before the label is read. A hidden note beside the title carries the verdict for screen readers, since the mark is visual only. Bands use the backend's thresholds. "Remove" hides only the Heavy AI Use band (`AI_FILTER_THRESHOLD`). An unanalyzed tile (`null` score) always renders normally. Scores come from `GET /video/evaluation` (never POST: browsing a feed must not queue its tiles for indexing), fanned out 4 at a time with a cache where only misses expire; under the in-memory cache (wiped whenever MV3 recycles the worker) sits a persistent `chrome.storage.local` layer (`shared/scoreCache.js`) written through only on a found score or a real "not analyzed" 404, never on a server error, so a transient outage can't get pinned as a miss.
 - **Auto-analyze** (`content/autoAnalyze.js`, `shared/autoAnalyze.js`, `MESSAGE_TYPES.QUEUE_ANALYSIS`): the one thing that *does* POST from a feed, behind the `chrome.storage.local["aitAutoAnalyze"]` switch. An `IntersectionObserver` (200px margin) queues each tile **as it scrolls into view**, so the work is bounded by what you actually look at rather than by how far YouTube has lazy-loaded; ids are sent 3 at a time and each one only once per time the mode is on. The background handler is deliberately *not* `requestEvaluation`: it must not touch the toolbar icon, which describes the watched video, not the thirty tiles scrolling past it. Videos still `indexing` are re-asked every 15s — that, not a DOM change, is what turns a queued tile into a flagged one — and a real score is handed to `scores.primeScore` so the next rescan marks the tile immediately instead of waiting out that module's 60s miss TTL. Its only visible effect is through the flags, so with **AI flags** off it fills the database silently.
+- **Fact check** (`ui/FactCheck.jsx`, `content/factCheckBridge.js`, `shared/factCheckState.js`): the Validity Score section at the bottom of the verdict card. It never shares the score poll above — that poll's whole design is to stop the moment a verdict settles, minutes before a fact check has anything to say — so the bridge runs its own 30s loop against `GET /video/fact-check` (via the worker's `GET_FACT_CHECK` handler) and stops on any terminal stage: `complete`, `skipped_fiction` (a genuine pre-gate verdict), or `failed` (a 404 keeps polling as `fact_checking`, an `unavailable` answer lands as `failed` with a retry). The bridge writes stage records into `chrome.storage.local` and `FactCheck.jsx` renders from them through `shared/factCheckState.js`, which is what lets a result written minutes after the verdict appear without a reload; `idle` (no record yet) renders nothing at all, not an empty section. Everything shown is model output or scraped page text, so it all renders through JSX text nodes, and citation hrefs pass an http/https allow-list first.
 - **Toolbar** (`manifest.action`, `background/indicator.js`): `popup.html` renders `<Settings>` on its own React root, which is the only way to reach the settings off a watch page; its layout ships as a real `dist/popup.css`, because Chrome measures the popup before any script runs and a width that arrives with styled-components leaves it sized to nothing. The icon is a solid rounded square drawn into an `OffscreenCanvas` and pushed with `chrome.action.setIcon`, **per tab**, so it always describes the video that tab is showing: grey with nothing to show, a pulsing amber square while the video answers `{status: "indexing"}`, and green once it has a verdict, which it stays. **A failed analysis answers 200 with `{status: "failed"}`, so anything that isn't an evaluation must not read as a verdict**: it turns red, and the content script stops polling, since a failure is remembered until the backend restarts. Each state also sets its own tooltip. `requestEvaluation` sets it from `sender.tab.id`, and the content script sends `CLEAR_INDICATOR` on **every** change of video, so each one runs its own cycle instead of inheriting the last one's colour until its first answer lands. Working tabs expire after `STALE_MS` so a closed tab can't pulse forever, and the module redraws the idle square on load in case a worker died mid-pulse. `icons/` holds the grey resting icon as `default_icon`.
 - All backend calls go through the service worker (`background/index.js`, one listener with a `HANDLERS` map). `npm test` runs the filter's unit tests (`node --test`).
 
@@ -46,7 +49,7 @@ React 18 + styled-components, bundled by esbuild (`jsx: "automatic"`, minified, 
 |---|---|---|
 | GPTZero transcript scan | up to −50 | GPTZero `/v2/predict/text` (see below) |
 | ElevenLabs voice scan (`elevenlabs_voice`) | up to −40 | ElevenLabs AI speech classifier over the audio (see below) |
-| Fact check (`fact_check`) | **not scored yet** (TBD) | Claude Opus 5 + web search over the transcript (see Fact check section) |
+| Fact check → Validity Score | **not scored yet** (TBD); reported as its own independent score | Claim extraction + Browserbase search/fetch + per-claim verification (see Fact check section) |
 | Stutters / filler words (absence ⇒ AI) | up to −20 | Transcript text analysis, ASR tracks only (see Filler-word section) |
 | Upload frequency + video length | up to −10 | Exact upload timestamps of the channel's latest 20 uploads via yt-dlp (see yt-dlp section) |
 | Account age | up to −5 | Exact timestamp of the channel's **oldest upload** via yt-dlp, a proxy because the creation date isn't available |
@@ -133,23 +136,91 @@ Measured calibration: human speech, silence, white/pink noise and a chord all la
 
 ---
 
-## Fact check (hallucination detection) — `backend/scoring/fact_check.py`
+## Fact check → Validity Score — `backend/factcheck/`
 
-The transcript goes through an LLM (Claude, `claude-opus-5`, Anthropic Python SDK) to produce three fields, stored as their own `videos` columns and returned by the API:
+The transcript goes through a five-stage pipeline that extracts individual factual
+claims, gathers live web evidence for each one, and scores the video's overall
+factual accuracy. The old single-thesis Anthropic check is gone.
 
-- `is_educational` (bool): is the video non-fiction whose main purpose is checkable factual claims? Only educational content is fact-checked. Fiction, comedy, music, gaming and vlogs are not.
-- `thesis` (string): the main thesis in one sentence. Set only when educational.
-- `hallucinated` (bool): **false only when independent third-party sources confirm the thesis is correct**. True when they contradict it or when nothing independent confirms it. Set only when educational.
+```
+backend/browserbase.py     All web access: POST /v1/search, POST /v1/fetch (markdown)
+backend/factcheck/
+  engine.py                FactCheckEngine.run() orchestrates the five stages
+  extract.py      (M1)     transcript → atomic claims + significance weight + search query
+  evidence.py     (M2)     claim → ranked, fetched, trimmed sources
+  verify.py       (M3)     claim × sources → status, debunk, verified citations
+  validity.py     (M4)     weighted Validity Score + rating bands (pure, no I/O)
+  report.py       (M5)     markdown report + JSON payload
+  llm.py                   provider shim: openai (default) | gateway | anthropic
+  models.py, text_utils.py dataclasses + normalize_for_match
+  __main__.py              standalone CLI
+```
 
-All three are null when the check couldn't run. **Without usable Anthropic credentials** (none configured, a placeholder or invalid key, or an `ant` profile with no credentials file), the first video logs one warning and the fact check is skipped for the rest of the run without sending more requests. The breakdown says "Skipped: no usable Anthropic credentials." Everything else still runs and is stored. Adding a key later doesn't backfill: rerun those videos with `--force`. The breakdown entry also carries a justification and source URLs as evidence.
+**Validity Score** — `V = Σ(wᵢ·sᵢ) / Σwᵢ × 100` over *verifiable* claims only.
+Weights: 3 = core thesis, 2 = major supporting stat, 1 = minor background.
+Scores: verified_true 1.0, mostly_true 0.75, misleading 0.25, false 0.0,
+unverifiable excluded from **both** numerator and denominator.
+Bands: ≥85 Highly Accurate · 65–84 Mostly Reliable · 40–64 Misleading Content Risk ·
+<40 High Falsehood / Unreliable. No verifiable claims ⇒ score `null`,
+"Insufficient Verifiable Data". Under 3 verifiable claims sets `low_confidence`.
 
-Two calls: (1) classification with a JSON-schema `output_config.format`; (2) for educational videos only, verification with the server-side `web_search_20260209` tool (max 5 searches). The verdict comes back through a `strict` `report_verdict` tool, because JSON output formats don't mix reliably with web-search citations. The verify loop resumes `pause_turn` up to 5 times. Both calls set `fallbacks="default"` (beta `server-side-fallback-2026-07-01`) so a safety decline re-runs on Anthropic's recommended fallback model; a final `refusal` fails the criterion.
+**The Validity Score is independent of the AI-slop score.** Being wrong and being
+AI-generated are different questions. The `fact_check` breakdown entry stays
+`applied: false, deduction: 0` — choosing a deduction is still an open decision.
 
-**Not scored yet:** the entry has `applied: false, deduction: 0`, so the breakdown shows it as "n/a" with its detail text. Choosing a deduction is an open decision.
+**Anti-hallucination is enforced in code, not prompt** (`verify.py::_validate_citations`).
+For every citation the model proposes: the `source_index` must resolve to a page we
+actually fetched; the quote must survive a `normalize_for_match` substring check against
+that source's **full** markdown (not the trimmed excerpt the model saw); and the emitted
+url/domain/title come from **our** `Source` record, never model output — so a URL cannot
+be fabricated even in principle. Quotes under 4 words / 20 chars are rejected ("the"
+substring-matches any page). A `false`/`misleading` verdict left with zero surviving
+citations is **downgraded to `unverifiable`** rather than trusted. `normalize_for_match`
+strips markdown links, emphasis, headings, blockquotes, bullets and table pipes, because
+a model quotes the *visible* text of a `**bolded**` sentence.
 
-Rejected alternative: GPTZero `/v2/bibliography-scan/text`. It expects documents with a works-cited section (which transcripts don't have) and is limited to 10 req/minute.
+**Source tiering** (`evidence.py`): Tier 1 = any `.gov/.edu/.int` plus named agencies and
+journals; Tier 2 = established outlets and fact-checkers; Tier 3 = everything else.
+Reddit, Quora, Medium, YouTube, social media, Substack and Wikipedia are excluded
+outright — citing a forum thread is worse than saying "unverifiable". Results rank by
+(tier, original rank).
 
-Auth: `ANTHROPIC_API_KEY`, or an `ant auth login` profile for venv runs (a set `ANTHROPIC_API_KEY`, even a placeholder, overrides the profile).
+**Trimming matters**: a real CDC page came back at 39,382 chars. `excerpt_for` keeps the
+lede plus the paragraphs richest in claim keywords, in document order, within a 6,000-char
+budget (~85% reduction), dropping nav menus and duplicate blocks that otherwise ate ~half
+the budget. `Source.markdown` keeps the full text so quote verification stays sound.
+
+**Concurrency**: `gather_all` runs every claim's searches and fetches through ONE shared
+`ThreadPoolExecutor`, never a pool nested in a pool, so total in-flight Browserbase calls
+stay bounded by `FACTCHECK_CONCURRENCY`.
+
+**Legacy columns** `is_educational` / `thesis` / `hallucinated` are still written, derived
+from the report so the extension keeps working: `is_educational` = ≥3 claims or one
+weight-3 claim; `thesis` = highest-weight claim; `hallucinated` = that claim rated
+false/misleading (an *unverifiable* thesis is **not** hallucinated — we couldn't check it,
+which isn't the same as the video being wrong). All three are null when the check
+couldn't run.
+
+**Degradation**: no usable LLM credentials ⇒ one warning, the criterion is skipped for the
+rest of the run, everything else still scores and stores. Nothing in this pipeline may
+raise into `analyze.py`. Adding a key later doesn't backfill — rerun with `--force`.
+
+**Auth**: `BROWSERBASE_API_KEY` (browsing) + one LLM key. `FACTCHECK_LLM_PROVIDER`
+defaults to `openai` (`OPENAI_API_KEY`). Browserbase **Model Gateway has no public REST
+endpoint** — it routes inside Stagehand only — so the `gateway` provider needs
+`BROWSERBASE_GATEWAY_URL` set and raises a clear error otherwise. `anthropic` remains
+selectable. **Never** set `BROWSERBASE_PROJECT_ID`; the API key resolves the project.
+
+Rejected alternative: GPTZero `/v2/bibliography-scan/text`. It expects documents with a
+works-cited section (which transcripts don't have) and is limited to 10 req/minute.
+
+**CLI / API**
+```
+python -m backend.factcheck <video_id> [--transcript FILE] [--format markdown|json]
+                                       [--max-claims N] [--no-store]
+GET /video/fact-check?video_id=…&format=json|markdown
+GET /video/evaluation?video_id=…      # now also carries validity_score, validity_rating
+```
 
 ---
 

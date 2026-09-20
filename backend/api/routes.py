@@ -1,14 +1,16 @@
 from typing import Any, cast
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, Response, jsonify, request
 
 from backend.api import indexing
 from backend.database import CommunityVoteRepository, EvaluationRepository
+from backend.factcheck.report import report_from_dict, to_markdown
 from backend.scoring import apply_channel_history
 
 api = Blueprint("api", __name__)
 
 VALID_VOTES = {"human", "ai"}
+VALID_FACT_CHECK_FORMATS = {"json", "markdown"}
 
 
 def _serve(evaluation: dict[str, Any]) -> dict[str, Any]:
@@ -71,6 +73,55 @@ def request_evaluation():
             return jsonify({"status": "failed", "detail": status})
 
     return jsonify(_serve(evaluation))
+
+
+@api.get("/video/fact-check")
+def get_fact_check():
+    video_id = request.args.get("video_id")
+    if not video_id:
+        return jsonify({"error": "video_id query parameter is required"}), 400
+
+    fmt = request.args.get("format", "json")
+    if fmt not in VALID_FACT_CHECK_FORMATS:
+        return jsonify({"error": f"format must be one of {sorted(VALID_FACT_CHECK_FORMATS)}"}), 400
+
+    evaluation = EvaluationRepository().find_by_video_id(video_id)
+    if evaluation is None:
+        return jsonify({"error": "this video hasn't been analyzed"}), 404
+
+    # A row exists, so 404 is over: the analysis ran, and the answer is one of
+    # three states. A report serves as before (bare dict, so existing consumers
+    # keep working); a pre-gate skip and a check that couldn't run each get a
+    # discriminated 200 -- the report dict has no top-level "status" key, so the
+    # shapes can't collide. A fallback-sourced pre-gate is not a classification
+    # (the classifier was down or had no credentials), so it reads as
+    # "unavailable", never as a statement about the video's content.
+    entry = _fact_check_entry(evaluation)
+    evidence = (entry or {}).get("evidence") or {}
+
+    report_dict = evidence.get("report")
+    if report_dict is not None:
+        if fmt == "markdown":
+            return Response(to_markdown(report_from_dict(report_dict)), mimetype="text/markdown")
+        return jsonify(report_dict)
+
+    pregate = evidence.get("pregate")
+    if (
+        isinstance(pregate, dict)
+        and pregate.get("isEligible") is False
+        and pregate.get("source") != "fallback"
+    ):
+        return jsonify({"status": "skipped", "pregate": pregate})
+
+    detail = (entry or {}).get("detail") or "The fact check didn't run for this video."
+    return jsonify({"status": "unavailable", "detail": detail})
+
+
+def _fact_check_entry(evaluation: dict) -> dict | None:
+    for item in evaluation.get("breakdown", []):
+        if item.get("criterion") == "fact_check":
+            return item
+    return None
 
 
 @api.post("/video/community-vote")

@@ -74,13 +74,28 @@ def evaluate_video(
     video_length_seconds: int,
     audio_path: Path | None,
     cues: list[Cue] | None = None,
+    *,
+    title: str | None = None,
+    description: str | None = None,
+    categories: list[str] | None = None,
 ) -> dict[str, Any]:
     breakdown = [
         _run("gptzero_transcript", gptzero.score_transcript, transcript, cues),
         _run("elevenlabs_voice", elevenlabs.score_audio, audio_path),
         _run("filler_words", fillers.score_transcript, transcript, track_kind),
     ]
-    fact_check_result = _run("fact_check", fact_check.score_transcript, transcript)
+    # title/description/categories are yt-dlp fields already in memory (see
+    # backend/analyze.py) -- passed through so fact_check.py's pre-gate can
+    # decide whether this video is worth fact-checking at all before the
+    # engine runs, at no extra cost (no additional yt-dlp call or download).
+    fact_check_result = _run(
+        "fact_check",
+        fact_check.score_transcript,
+        transcript,
+        title=title,
+        description=description,
+        categories=categories,
+    )
     breakdown.append(fact_check_result)
 
     if channel_id:
@@ -104,6 +119,10 @@ def evaluate_video(
         "is_educational": facts.get("is_educational"),
         "thesis": facts.get("thesis"),
         "hallucinated": facts.get("hallucinated"),
+        # Validity Score from the fact-check engine: independent of `score`
+        # above (fact_check is never applied to the AI-slop deduction math).
+        "validity_score": facts.get("validity_score"),
+        "validity_rating": facts.get("validity_rating"),
     }
 
 

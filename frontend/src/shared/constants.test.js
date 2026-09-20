@@ -19,6 +19,10 @@ test("message types are distinct", () => {
   assert.equal(new Set(values).size, values.length);
 });
 
+test("the fact-check bridge's message type is registered", () => {
+  assert.equal(MESSAGE_TYPES.GET_FACT_CHECK, "ait:get-fact-check");
+});
+
 test("filter constants match the shared storage contract", () => {
   assert.deepEqual(FILTER_STATES, ["off", "flag", "block"]);
   assert.equal(DEFAULT_FILTER_STATE, "off");
