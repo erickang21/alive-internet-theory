@@ -19,9 +19,16 @@ const options = {
   target: "chrome120",
 };
 
-// Only the tile decoration ships as a stylesheet; the rest is styled-components.
+// Two stylesheets ship as files, because both have to apply before any script runs:
+// the tile decoration and the popup's own layout. The rest is styled-components.
+const styles = {
+  "dist/filter.css": "src/content/filter.css",
+  "dist/popup.css": "src/popup/popup.css",
+};
+
 const buildStyles = () => {
-  writeFileSync("dist/filter.css", readFileSync("src/content/filter.css", "utf8"));
+  for (const [out, source] of Object.entries(styles))
+    writeFileSync(out, readFileSync(source, "utf8"));
 };
 
 if (watch) {

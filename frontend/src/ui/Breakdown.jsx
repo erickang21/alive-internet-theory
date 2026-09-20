@@ -42,18 +42,14 @@ const CRITERIA = {
       ["Average score", number(evidence.average_score, " / 100")],
     ],
   },
-  tts_likelihood: { name: "Text-to-speech likelihood" },
+  elevenlabs_voice: {
+    name: "Text-to-speech likelihood",
+    rows: (evidence) => [["ElevenLabs voice", percent(evidence.probability)]],
+  },
 };
 
-// The fact check isn't scored, so the breakdown leaves it out. The backend has no
-// voice analysis yet: until it sends tts_likelihood, this placeholder holds its row.
+// The fact check isn't scored, so the breakdown leaves it out.
 const HIDDEN = new Set(["fact_check"]);
-const TTS_PLACEHOLDER = {
-  criterion: "tts_likelihood",
-  applied: false,
-  deduction: 0,
-  detail: "Voice analysis is coming soon.",
-};
 
 const List = styled.ol`
   margin: 0;
@@ -220,9 +216,6 @@ const PhraseLabel = styled.p`
 export function Breakdown({ evaluation }) {
   const [open, setOpen] = useState(null);
   const items = (evaluation.breakdown ?? []).filter((item) => !HIDDEN.has(item.criterion));
-  if (!items.some((item) => item.criterion === TTS_PLACEHOLDER.criterion)) {
-    items.push(TTS_PLACEHOLDER);
-  }
 
   return (
     <List>

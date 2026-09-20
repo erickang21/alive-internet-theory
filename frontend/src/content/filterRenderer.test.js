@@ -211,14 +211,12 @@ describe("threshold direction", () => {
 
   test("each score band gets its own preview label", () => {
     const expected = [
-      [10, "AI"],
-      [44.9, "AI"],
+      [10, "AI Slop"],
+      [44.9, "AI Slop"],
       [45, "Likely AI"],
       [74.9, "Likely AI"],
       [75, "Likely Human"],
-      [89.9, "Likely Human"],
-      [90, "Human"],
-      [100, "Human"],
+      [100, "Likely Human"],
     ];
     for (const [score, label] of expected) {
       withFakeDom((doc) => {
@@ -250,7 +248,7 @@ describe("threshold direction", () => {
       applyFilter("flag", [{ tile, videoId: "v", score: 95 }]);
       const badges = thumb.querySelectorAll(".ait-flag-badge");
       assert.equal(badges.length, 1);
-      assert.equal(badges[0].textContent, "Human");
+      assert.equal(badges[0].textContent, "Likely Human");
     });
   });
 });

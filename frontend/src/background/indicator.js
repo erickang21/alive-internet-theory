@@ -1,77 +1,78 @@
 const SIZE = 32;
-const FRAME_MS = 70;
+const INSET = 2;
+const RADIUS = 8;
+const FRAME_MS = 60;
 const TURN = Math.PI * 2;
-const STEP = TURN / 28;
-const SWEEP = TURN * 0.3;
-// A tab closed mid-analysis stops refreshing this, so the spinner can't run forever.
-const STALE_MS = 75_000;
-const DONE_MS = 4_000;
+const PULSE_MS = 1_400;
+// A tab that navigates away or closes stops refreshing this, so the pulse can't run on.
+const STALE_MS = 30_000;
 
 const IDLE = "#8b8b8b";
 const WORKING = "#ffb300";
 const DONE = "#1ea54c";
+const FAILED = "#d93025";
 
-const active = new Map();
+const COLOURS = { idle: IDLE, working: WORKING, done: DONE, failed: FAILED };
+const TITLES = {
+  idle: "Alive Internet Theory",
+  working: "Analyzing this video\u2026",
+  done: "This video has been analyzed",
+  failed: "Couldn't analyze this video \u2014 see the backend logs",
+};
+
+const working = new Map();
 let timer = null;
-let settle = null;
-let angle = 0;
+let started = 0;
 
-/** Idle is grey, a spinning amber ring means a video is being analyzed, and green
- * marks one that just finished. */
-export function setIndexing(videoId, indexing) {
-  clearTimeout(settle);
-  settle = null;
-  if (indexing) {
-    active.set(videoId, Date.now() + STALE_MS);
-    if (timer === null) timer = setInterval(tick, FRAME_MS);
+/** The icon is per tab, so it always describes the video the viewer is looking at:
+ * grey with nothing to show, a pulsing amber square while it's analyzed, green once
+ * it has a verdict. */
+export function setIndicator(tabId, state) {
+  if (!Number.isInteger(tabId)) return;
+  chrome.action.setTitle({ tabId, title: TITLES[state] }).catch(() => {});
+  if (state === "working") {
+    working.set(tabId, Date.now() + STALE_MS);
+    if (timer === null) {
+      started = Date.now();
+      timer = setInterval(tick, FRAME_MS);
+    }
     return;
   }
-  // Only a video we were watching can have just finished; anything else was already idle.
-  const finished = active.delete(videoId);
-  if (active.size) return;
-  stop();
-  if (!finished) return;
-  draw(DONE);
-  settle = setTimeout(() => draw(IDLE), DONE_MS);
+  working.delete(tabId);
+  if (!working.size) stop();
+  draw(tabId, COLOURS[state]);
 }
 
 function tick() {
-  for (const [id, expiry] of active) {
-    if (expiry <= Date.now()) active.delete(id);
+  const now = Date.now();
+  for (const [tabId, expiry] of working) {
+    if (expiry <= now) {
+      working.delete(tabId);
+      draw(tabId, IDLE);
+    }
   }
-  if (!active.size) {
-    stop();
-    return draw(IDLE);
-  }
-  angle = (angle + STEP) % TURN;
-  draw(WORKING, angle);
+  if (!working.size) return stop();
+  // A slow sine, so the ring breathes rather than blinks.
+  const alpha = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(((now - started) / PULSE_MS) * TURN));
+  for (const tabId of working.keys()) draw(tabId, WORKING, alpha);
 }
 
 function stop() {
   clearInterval(timer);
   timer = null;
-  angle = 0;
 }
 
-function draw(color, rotation = null) {
+function draw(tabId, color, alpha = 1) {
   const context = new OffscreenCanvas(SIZE, SIZE).getContext("2d");
-  const center = SIZE / 2;
-  const radius = center - 3.5;
-  context.lineWidth = 4;
-  context.lineCap = "round";
-  context.globalAlpha = rotation === null ? 1 : 0.25;
-  context.strokeStyle = color;
+  context.globalAlpha = alpha;
+  context.fillStyle = color;
   context.beginPath();
-  context.arc(center, center, radius, 0, TURN);
-  context.stroke();
-  if (rotation !== null) {
-    context.globalAlpha = 1;
-    context.beginPath();
-    context.arc(center, center, radius, rotation, rotation + SWEEP);
-    context.stroke();
-  }
-  void chrome.action.setIcon({ imageData: { [SIZE]: context.getImageData(0, 0, SIZE, SIZE) } });
+  context.roundRect(INSET, INSET, SIZE - 2 * INSET, SIZE - 2 * INSET, RADIUS);
+  context.fill();
+  const imageData = { [SIZE]: context.getImageData(0, 0, SIZE, SIZE) };
+  // The tab can close between frames, which rejects rather than throwing.
+  chrome.action.setIcon(tabId === null ? { imageData } : { tabId, imageData }).catch(() => {});
 }
 
-// A worker that dies mid-spin leaves the last frame on the toolbar until we reset it.
-draw(IDLE);
+// A worker that died mid-pulse can leave amber behind as the default for new tabs.
+draw(null, IDLE);

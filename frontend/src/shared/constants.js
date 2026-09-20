@@ -11,6 +11,7 @@ export const MESSAGE_TYPES = {
   SUBMIT_VOTE: "ait:submit-vote",
   GET_EVALUATIONS: "ait:get-evaluations",
   RERUN_EVALUATION: "ait:rerun-evaluation",
+  CLEAR_INDICATOR: "ait:clear-indicator",
 };
 
 export const FILTER_STATES = ["off", "flag", "block"];

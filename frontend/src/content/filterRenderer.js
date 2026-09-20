@@ -22,12 +22,11 @@ const HIDDEN_CLASS = "ait-filtered-hidden";
 const BADGE_CLASS = "ait-flag-badge";
 const INLINE_CLASS = "ait-flag-inline";
 
-// 45 and 75 are the backend's verdict thresholds; 90 splits off the clear-cut humans.
+// The backend's own verdict thresholds, so a preview label always matches the card.
 const BANDS = [
-  { min: 90, label: "Human", tone: "human" },
   { min: 75, label: "Likely Human", tone: "likely-human" },
   { min: AI_FILTER_THRESHOLD, label: "Likely AI", tone: "likely-ai" },
-  { min: -Infinity, label: "AI", tone: "ai" },
+  { min: -Infinity, label: "AI Slop", tone: "ai" },
 ];
 
 function bandFor(score) {

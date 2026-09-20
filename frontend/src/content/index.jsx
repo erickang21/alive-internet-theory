@@ -21,18 +21,14 @@ function getVideoIdFromUrl() {
 
 async function showCurrentVideo() {
   const videoId = getVideoIdFromUrl();
-  if (!videoId) {
-    stopPolling();
-    currentVideoId = null;
-    hideCard();
-    return;
-  }
   if (videoId === currentVideoId) return;
   stopPolling();
   currentVideoId = videoId;
-
   hideCard();
-  await poll(videoId, true);
+  // Reset the toolbar so each video runs its own idle -> working -> done cycle, rather
+  // than inheriting the last one's colour until its first answer comes back.
+  send({ type: MESSAGE_TYPES.CLEAR_INDICATOR });
+  if (videoId) await poll(videoId, true);
 }
 
 // Debug mode: drop the card, re-analyze, and let the fresh verdict arrive like any
@@ -48,6 +44,16 @@ async function rerunCurrentVideo() {
     console.warn("[alive-internet-theory]", error);
   }
   if (videoId === currentVideoId) await poll(videoId);
+}
+
+// sendMessage throws synchronously once the extension is reloaded under an open tab,
+// which would otherwise take the rest of the navigation down with it.
+function send(message) {
+  try {
+    void chrome.runtime.sendMessage(message).catch(() => {});
+  } catch {
+    // The page needs a reload to talk to the new worker; nothing to do here.
+  }
 }
 
 function stopPolling() {
@@ -77,8 +83,10 @@ async function showEvaluation(videoId, first) {
       throw new Error(response?.error ?? "no response from service worker");
     }
     // An unanalyzed video comes back as a status, not an evaluation. The request
-    // itself has queued it for indexing; the next poll picks up the verdict.
-    if (response.result.status) return false;
+    // itself has queued it for indexing; the next poll picks up the verdict. A failed
+    // analysis is remembered until the backend restarts, so there is nothing to wait
+    // for and the toolbar carries it instead.
+    if (response.result.status) return response.result.status !== "indexing";
     showCard(
       <Card
         evaluation={response.result}
