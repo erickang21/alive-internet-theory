@@ -5,15 +5,15 @@
 // aitFactCheck: records, so without this module FactCheckCard sits at "idle"
 // forever, however correctly everything downstream of storage is wired.
 //
-// This is a SEPARATE poll loop from content/index.js's AI-score poll, on
-// purpose. That loop's poll() stops rescheduling the moment a score renders
-// (index.js:188-192 - showEvaluation() returns true on renderEvaluation()),
-// because a stored evaluation is durable and never needs re-checking. The
-// fact-check for that same video can still be minutes away at that point, so
-// hanging this off the same loop would strand the card at "fact_checking"
-// forever right when the AI score appears - the exact bug this module exists
-// to prevent, just moved one stage later. The two loops share only the
-// cadence constants and jitter formula, never a timer.
+// This is a SEPARATE poll loop from content/index.jsx's AI-score poll, on
+// purpose. That loop's poll() stops rescheduling the moment showEvaluation()
+// settles (a verdict or a remembered failure on screen), because a stored
+// evaluation is durable and never needs re-checking. The fact-check for that
+// same video can still be minutes away at that point, so hanging this off the
+// same loop would strand the card at "fact_checking" forever right when the
+// AI score appears - the exact bug this module exists to prevent, just moved
+// one stage later. The two loops share nothing but their terminal discipline:
+// each has its own timer and its own cadence constants below.
 
 import { MESSAGE_TYPES } from "../shared/constants.js";
 import { setFactCheckState } from "../shared/factCheckState.js";
@@ -173,7 +173,9 @@ export function createFactCheckBridge({
     if (!response?.ok) {
       throw new Error(response?.error ?? "no response from service worker");
     }
-    return response;
+    // The worker's HANDLERS wrapper answers {ok, result}; the result is the
+    // {stage, report?, pregate?, detail?} object the stage mapping reads.
+    return response.result;
   }
 
   async function tick(forVideoId) {

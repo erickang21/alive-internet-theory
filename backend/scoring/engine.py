@@ -5,6 +5,7 @@ from typing import Any, ParamSpec
 
 from backend import ytdlp
 from backend.scoring import channel_history, elevenlabs, fact_check, fillers, gptzero, youtube
+from backend.transcripts import Cue
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,7 @@ def _safe(
             "criterion": criterion_name,
             "deduction": 0,
             "applied": False,
-            "detail": "Criterion unavailable (upstream error).",
+            "reason": "upstream_error",
         }
 
 
@@ -59,7 +60,9 @@ def _run(
     result = _safe(criterion_name, fn, *args, **kwargs)
     deduction = result["deduction"]
     outcome = ("-" + str(deduction) if deduction else "0") if result["applied"] else "n/a"
-    logger.info("score: %s %s, %s", criterion_name, outcome, result["detail"])
+    # The breakdown carries fields now, not prose, so the log says what it was given.
+    note = result.get("reason") or result.get("evidence") or ""
+    logger.info("score: %s %s, %s", criterion_name, outcome, note)
     return result
 
 
@@ -70,13 +73,14 @@ def evaluate_video(
     channel_id: str | None,
     video_length_seconds: int,
     audio_path: Path | None,
+    cues: list[Cue] | None = None,
     *,
     title: str | None = None,
     description: str | None = None,
     categories: list[str] | None = None,
 ) -> dict[str, Any]:
     breakdown = [
-        _run("gptzero_transcript", gptzero.score_transcript, transcript),
+        _run("gptzero_transcript", gptzero.score_transcript, transcript, cues),
         _run("elevenlabs_voice", elevenlabs.score_audio, audio_path),
         _run("filler_words", fillers.score_transcript, transcript, track_kind),
     ]

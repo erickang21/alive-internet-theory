@@ -1,54 +1,64 @@
-/* AI Video Tri-State Filter — tile decoration styles.
- *
- * NOTE (build integration gap): build.js only bundles content/background and
- * copies overlay.css into dist/ (see copyStatic() in build.js) — it does not
- * know about this file, and this agent is scoped out of editing build.js or
- * manifest.json to wire it in. A future change should add filter.css to
- * copyStatic() (and, if the extension ever needs it outside a content
- * script context, to manifest.json's content_scripts "css" array or
- * web_accessible_resources) the same way overlay.css is registered today.
- *
- * Until that lands, filterRenderer.js injects an equivalent <style id="ait-filter-style">
- * tag at runtime (guarded so it only runs once) so the filter works without a build
- * change. Keep that inline copy (FILTER_CSS in filterRenderer.js) in sync with this file.
- */
-
-/* "block" — reversible class-based hide. Never remove YouTube's nodes or set
-   inline styles on them; toggling this class is what lets the grid reflow. */
 .ait-filtered-hidden {
   display: none !important;
 }
 
-/* Positioning helper for the thumbnail wrapper so the badge can be absolutely
-   positioned without touching YouTube's own inline styles. */
 .ait-thumb-positioned {
   position: relative;
 }
 
-/* "flag" — badge overlaid top-right of the thumbnail. */
-.ait-flag-badge {
+/* The mark covers the thumbnail and darkens the image behind its pill, so a flagged
+   tile reads as set aside without the title and channel fading with it. The weaker
+   band darkens less, so the two are told apart before the label is read. */
+.ait-mark {
+  --ait-flag: #cc0000;
   position: absolute;
-  top: 4px;
-  right: 4px;
-  z-index: 9999;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: #4c1a1a;
-  color: #ff7b72;
-  font-family: "Roboto", "Segoe UI", sans-serif;
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1.4;
-  white-space: nowrap;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding: 6px;
+  border-radius: inherit;
+  background: rgb(0 0 0 / 50%);
   pointer-events: none;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
 }
 
-/* "flag" — inline icon next to the title. */
-.ait-flag-inline {
-  display: inline-block;
-  margin-left: 6px;
-  color: #ff7b72;
-  font-size: 12px;
-  vertical-align: middle;
+.ait-mark--likely-ai {
+  --ait-flag: #e8710a;
+  background: rgb(0 0 0 / 30%);
+}
+
+.ait-mark__pill {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px 2px 6px;
+  border-radius: 6px;
+  background: var(--ait-flag);
+  color: #fff;
+  font-family: "Roboto", "Arial", sans-serif;
+  font-size: 1.3rem;
+  line-height: 2rem;
+  font-weight: 500;
+  white-space: nowrap;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 40%);
+}
+
+.ait-mark__icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  fill: currentColor;
+}
+
+/* Announced, never shown: the mark is visual only. */
+.ait-flag-note {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }

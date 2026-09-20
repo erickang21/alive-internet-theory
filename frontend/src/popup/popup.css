@@ -1,0 +1,16 @@
+/* Loaded as a real stylesheet: Chrome measures the popup before any script runs, so a
+   width that only arrives with styled-components leaves it sized to nothing. The token
+   fallbacks keep it right in that first frame too. */
+html {
+  font-size: 10px;
+  color-scheme: light dark;
+}
+
+body {
+  width: 300px;
+  margin: 0;
+  padding: 12px 16px 16px;
+  background: var(--ait-menu, Canvas);
+  color: var(--ait-text, CanvasText);
+  font-family: var(--ait-font, "Roboto", "Arial", sans-serif);
+}

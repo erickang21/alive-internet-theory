@@ -1,11 +1,11 @@
 # Alive Internet Theory
 
-Chrome extension that overlays on YouTube videos and Shorts and rates them **Likely human / Likely AI / AI Slop**. The backend pulls everything from YouTube with yt-dlp, scores it, and stores the result in SQLite. Videos get analyzed when devs run the analyze script on them, or quietly in the background the first time someone opens them with the extension. A Flask API serves the results to the extension. **New here? Start with [GUIDE.md](GUIDE.md)** (quick start and usage). See [CLAUDE.md](CLAUDE.md) for the full design reference.
+Chrome extension that embeds a verdict card in YouTube watch pages and Shorts and rates videos **Likely human / Likely AI / Heavy AI Use**. The backend pulls everything from YouTube with yt-dlp, scores it, and stores the result in SQLite. Videos get analyzed when devs run the analyze script on them, or quietly in the background the first time someone opens them with the extension. A Flask API serves the results to the extension. **New here? Start with [GUIDE.md](GUIDE.md)** (quick start and usage). See [CLAUDE.md](CLAUDE.md) for the full design reference.
 
 ## Layout
 
 ```
-frontend/                  Chrome extension (Manifest V3, esbuild): overlay; queues unanalyzed videos silently
+frontend/                  Chrome extension (Manifest V3, esbuild): verdict card, breakdown/settings popover, feed filter; queues unanalyzed videos silently
 backend/analyze.py         CLI that analyzes videos and writes evaluations
 backend/ytdlp.py           yt-dlp: metadata, thumbnail, captions, audio, channel uploads
 backend/transcripts.py     Caption parsing, local Whisper speech-to-text fallback
@@ -93,7 +93,7 @@ python -m backend.api.app
 
 Both serve `http://127.0.0.1:5000`; check with `curl http://127.0.0.1:5000/health`. Docker keeps the database, downloaded media, and Whisper weights in the `backend-data` volume, which is separate from a venv run's `backend/data/`. `docker compose run` uses the same volume, so videos you analyze in Docker show up in the Docker API.
 
-**Use the extension:** open any YouTube watch or Shorts page. The overlay in the top right shows the stored verdict with an expandable per-criterion breakdown, or "Not analyzed" if there isn't one yet. In that case opening the video has queued it in the background, and the verdict shows up the next time you open it.
+**Use the extension:** open any YouTube watch or Shorts page. The card above the related videos (top right on Shorts) shows the verdict and score; **View breakdown** opens the per-criterion breakdown and the feed-filter settings, and the thumbs record whether you agree with the verdict. Unanalyzed videos show nothing and are queued in the background; the card appears once the verdict lands.
 
 **After changing frontend code:** rebuild with `npm run build` (or leave `npm run watch` running), then click the reload icon on the extension card in `chrome://extensions` and refresh the YouTube tab. Backend code changes only need the Flask process restarted (or set `FLASK_DEBUG=1` in `backend/.env` for auto-reload); under Docker, rerun `docker compose up --build`.
 

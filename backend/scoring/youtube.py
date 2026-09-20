@@ -25,7 +25,7 @@ def score_upload_pattern(channel: dict[str, Any], video_length_seconds: int) -> 
             "criterion": "upload_pattern",
             "deduction": 0,
             "applied": False,
-            "detail": "Too few uploads to judge posting cadence.",
+            "reason": "too_few_uploads",
         }
 
     gaps_hours = [
@@ -43,11 +43,9 @@ def score_upload_pattern(channel: dict[str, Any], video_length_seconds: int) -> 
         "criterion": "upload_pattern",
         "deduction": deduction,
         "applied": True,
-        "detail": (
-            f"Median gap between uploads: {median_gap:.1f}h over last {len(timestamps)} videos."
-        ),
         "evidence": {"median_gap_hours": round(median_gap, 1), "uploads_sampled": len(timestamps)},
     }
+
 
 
 def score_account_age(channel: dict[str, Any]) -> dict[str, Any]:
@@ -57,7 +55,7 @@ def score_account_age(channel: dict[str, Any]) -> dict[str, Any]:
             "criterion": "account_age",
             "deduction": 0,
             "applied": False,
-            "detail": "No public uploads to date the channel by.",
+            "reason": "no_uploads",
         }
 
     # YouTube's channel creation date isn't available through yt-dlp, so the
@@ -73,6 +71,5 @@ def score_account_age(channel: dict[str, Any]) -> dict[str, Any]:
         "criterion": "account_age",
         "deduction": deduction,
         "applied": True,
-        "detail": f"Channel's oldest upload is {age_days} days old.",
         "evidence": {"oldest_upload_age_days": age_days},
     }

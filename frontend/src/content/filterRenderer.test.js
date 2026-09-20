@@ -6,6 +6,7 @@ import { applyFilter, clearFilter } from "./filterRenderer.js";
 
 // --- Minimal hand-rolled fake DOM -------------------------------------------------
 // Just enough of the Element/Document surface for filterRenderer.js: createElement,
+// createElementNS,
 // classList add/remove/contains, setAttribute/getAttribute/removeAttribute,
 // querySelector/querySelectorAll (tag, #id, .class, [attr] presence, comma lists),
 // appendChild/remove, and textContent. No jsdom/linkedom — none is installed and the
@@ -130,6 +131,8 @@ function makeFakeDocument() {
     body,
     documentElement: new FakeElement("html"),
     createElement: (tag) => new FakeElement(tag),
+    // The mark carries an SVG icon, so the renderer reaches for the namespaced factory.
+    createElementNS: (_namespace, tag) => new FakeElement(tag),
     getElementById(id) {
       return head.querySelector(`#${id}`) ?? body.querySelector(`#${id}`) ?? null;
     },
@@ -191,20 +194,62 @@ describe("threshold direction", () => {
     });
   });
 
-  test("score below threshold IS flagged with a badge and inline icon", () => {
+  test("score below threshold IS dimmed, badged and announced", () => {
     withFakeDom((doc) => {
       const { tile, thumb, title } = makeTile(doc);
       applyFilter("flag", [{ tile, videoId: "low", score: 10 }]);
-      assert.equal(thumb.querySelectorAll(".ait-flag-badge").length, 1);
-      assert.equal(title.parentNode.querySelectorAll(".ait-flag-inline").length, 1);
+      assert.equal(thumb.querySelectorAll(".ait-mark").length, 1);
+      assert.equal(title.parentNode.querySelectorAll(".ait-flag-note").length, 1);
     });
   });
 
-  test("score above threshold is NOT flagged", () => {
+  test("a likely-human score is left completely alone", () => {
     withFakeDom((doc) => {
       const { tile } = makeTile(doc);
       applyFilter("flag", [{ tile, videoId: "high", score: 90 }]);
-      assert.equal(tile.querySelectorAll(".ait-flag-badge, .ait-flag-inline").length, 0);
+      assert.equal(tile.querySelectorAll(".ait-mark, .ait-flag-note").length, 0);
+      assert.equal(tile.getAttribute("data-ait-filter-applied"), "off");
+    });
+  });
+
+  test("each score band gets its own preview label", () => {
+    const expected = [
+      [10, "Heavy AI Use", "ait-mark--ai"],
+      [44.9, "Heavy AI Use", "ait-mark--ai"],
+      [45, "Likely AI", "ait-mark--likely-ai"],
+      [74.9, "Likely AI", "ait-mark--likely-ai"],
+    ];
+    for (const [score, label, tone] of expected) {
+      withFakeDom((doc) => {
+        const { tile, thumb } = makeTile(doc);
+        applyFilter("flag", [{ tile, videoId: "v", score }]);
+        assert.equal(thumb.querySelectorAll(".ait-mark__label")[0].textContent, label, `${score}`);
+        assert.ok(thumb.querySelectorAll(".ait-mark")[0].className.includes(tone), `${score} tone`);
+      });
+    }
+  });
+
+  test("block hides only the AI band and still labels the rest", () => {
+    withFakeDom((doc) => {
+      const ai = makeTile(doc);
+      const likelyAi = makeTile(doc);
+      applyFilter("block", [
+        { tile: ai.tile, videoId: "a", score: 10 },
+        { tile: likelyAi.tile, videoId: "b", score: 60 },
+      ]);
+      assert.ok(ai.tile.classList.contains("ait-filtered-hidden"));
+      assert.ok(!likelyAi.tile.classList.contains("ait-filtered-hidden"));
+      assert.equal(likelyAi.thumb.querySelectorAll(".ait-mark__label")[0].textContent, "Likely AI");
+    });
+  });
+
+  test("a rescore into another band replaces the label", () => {
+    withFakeDom((doc) => {
+      const { tile, thumb } = makeTile(doc);
+      applyFilter("flag", [{ tile, videoId: "v", score: 60 }]);
+      applyFilter("flag", [{ tile, videoId: "v", score: 20 }]);
+      assert.equal(thumb.querySelectorAll(".ait-mark").length, 1);
+      assert.equal(thumb.querySelectorAll(".ait-mark__label")[0].textContent, "Heavy AI Use");
     });
   });
 });
@@ -216,7 +261,7 @@ describe("score === null (not analyzed yet)", () => {
     withFakeDom((doc) => {
       const { tile } = makeTile(doc);
       applyFilter("flag", [{ tile, videoId: "unknown", score: null }]);
-      assert.equal(tile.querySelectorAll(".ait-flag-badge, .ait-flag-inline").length, 0);
+      assert.equal(tile.querySelectorAll(".ait-mark, .ait-flag-note").length, 0);
     });
   });
 
@@ -238,15 +283,15 @@ describe("idempotency", () => {
       const entries = [{ tile, videoId: "low", score: 10 }];
 
       applyFilter("flag", entries);
-      const afterOne = tile.querySelectorAll(".ait-flag-badge, .ait-flag-inline").length;
+      const afterOne = tile.querySelectorAll(".ait-mark, .ait-flag-note").length;
 
       applyFilter("flag", entries);
       applyFilter("flag", entries);
-      const afterThree = tile.querySelectorAll(".ait-flag-badge, .ait-flag-inline").length;
+      const afterThree = tile.querySelectorAll(".ait-mark, .ait-flag-note").length;
 
       assert.equal(afterOne, 2); // one badge + one inline icon
       assert.equal(afterThree, afterOne);
-      assert.equal(tile.getAttribute("data-ait-filter-applied"), "flag");
+      assert.equal(tile.getAttribute("data-ait-filter-applied"), "flag:ai");
     });
   });
 
@@ -274,10 +319,10 @@ describe("flag -> block transition", () => {
       const entries = [{ tile, videoId: "low", score: 10 }];
 
       applyFilter("flag", entries);
-      assert.equal(tile.querySelectorAll(".ait-flag-badge, .ait-flag-inline").length, 2);
+      assert.equal(tile.querySelectorAll(".ait-mark, .ait-flag-note").length, 2);
 
       applyFilter("block", entries);
-      assert.equal(tile.querySelectorAll(".ait-flag-badge, .ait-flag-inline").length, 0);
+      assert.equal(tile.querySelectorAll(".ait-mark, .ait-flag-note").length, 0);
       assert.ok(tile.classList.contains("ait-filtered-hidden"));
       assert.equal(tile.getAttribute("data-ait-filter-applied"), "block");
     });
@@ -307,12 +352,12 @@ describe("clearFilter", () => {
       applyFilter("block", [{ tile: blocked.tile, videoId: "b", score: 5 }]);
 
       // Sanity: decoration is actually present before clearing.
-      assert.ok(doc.body.querySelectorAll(".ait-flag-badge, .ait-flag-inline").length > 0);
+      assert.ok(doc.body.querySelectorAll(".ait-mark, .ait-flag-note").length > 0);
       assert.ok(doc.body.querySelectorAll(".ait-filtered-hidden").length > 0);
 
       clearFilter();
 
-      assert.equal(doc.body.querySelectorAll(".ait-flag-badge, .ait-flag-inline").length, 0);
+      assert.equal(doc.body.querySelectorAll(".ait-mark, .ait-flag-note").length, 0);
       assert.equal(doc.body.querySelectorAll(".ait-filtered-hidden").length, 0);
       assert.equal(doc.body.querySelectorAll(".ait-thumb-positioned").length, 0);
       assert.equal(doc.body.querySelectorAll("[data-ait-filter-applied]").length, 0);
@@ -336,10 +381,10 @@ describe("clearFilter", () => {
     withFakeDom((doc) => {
       const { tile } = makeTile(doc);
       applyFilter("flag", [{ tile, videoId: "a", score: 10 }]);
-      assert.equal(tile.querySelectorAll(".ait-flag-badge, .ait-flag-inline").length, 2);
+      assert.equal(tile.querySelectorAll(".ait-mark, .ait-flag-note").length, 2);
 
       applyFilter("off", [{ tile, videoId: "a", score: 10 }]);
-      assert.equal(tile.querySelectorAll(".ait-flag-badge, .ait-flag-inline").length, 0);
+      assert.equal(tile.querySelectorAll(".ait-mark, .ait-flag-note").length, 0);
       assert.equal(tile.getAttribute("data-ait-filter-applied"), "off");
     });
   });

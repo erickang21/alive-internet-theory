@@ -55,6 +55,12 @@ def request_evaluation():
     if not isinstance(video_id, str) or not video_id:
         return jsonify({"error": "video_id is required and must be a string"}), 400
 
+    if body.get("force") is True:
+        _ = indexing.request(video_id, force=True)
+    # A rerun keeps the old row until the new one lands, so don't serve it meanwhile.
+    if indexing.is_pending(video_id):
+        return jsonify({"status": "indexing"}), 202
+
     repo = EvaluationRepository()
     evaluation = repo.find_by_video_id(video_id)
     if evaluation is None:

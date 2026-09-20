@@ -1,13 +1,28 @@
 import { API_BASE_URL, MESSAGE_TYPES } from "../shared/constants.js";
-import { getCachedScore, putCachedScore } from "../shared/scoreCache.js";
+import { setIndicator } from "./indicator.js";
+import { getScores } from "./scores.js";
+
+// A request that never settles never calls sendResponse, leaving the content script
+// waiting for an answer that cannot arrive.
+const REQUEST_TIMEOUT_MS = 20_000;
+
+const HANDLERS = {
+  [MESSAGE_TYPES.REQUEST_EVALUATION]: ({ videoId }, tabId) => requestEvaluation(videoId, tabId),
+  [MESSAGE_TYPES.RERUN_EVALUATION]: ({ videoId }, tabId) => requestEvaluation(videoId, tabId, true),
+  [MESSAGE_TYPES.SUBMIT_VOTE]: submitVote,
+  [MESSAGE_TYPES.GET_EVALUATIONS]: getScores,
+  [MESSAGE_TYPES.GET_FACT_CHECK]: ({ videoId }) => getFactCheckStatus(videoId),
+  [MESSAGE_TYPES.CLEAR_INDICATOR]: async (_message, tabId) => setIndicator(tabId, "idle"),
+};
 
 // The service worker owns backend calls: its host_permissions exempt it from
 // the CORS and private-network checks a youtube.com content script would hit
 // calling 127.0.0.1.
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message?.type !== MESSAGE_TYPES.REQUEST_EVALUATION) return false;
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  const handler = HANDLERS[message?.type];
+  if (!handler) return false;
 
-  requestEvaluation(message.videoId)
+  handler(message, sender.tab?.id)
     .then((result) => sendResponse({ ok: true, result }))
     .catch((error) => sendResponse({ ok: false, error: String(error) }));
   return true;
@@ -15,33 +30,40 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
 // Returns the stored evaluation. For a video that isn't stored yet, the backend
 // quietly starts indexing it and answers {status: "indexing"} or
-// {status: "failed", detail}.
-async function requestEvaluation(videoId) {
+// {status: "failed", detail}. `force` re-runs the analysis of a stored video
+// (debug mode), which answers {status: "indexing"} until the new result lands.
+async function requestEvaluation(videoId, tabId, force = false) {
   const response = await fetch(`${API_BASE_URL}/video/evaluation`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ video_id: videoId }),
+    body: JSON.stringify({ video_id: videoId, force }),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!response.ok && response.status !== 202) {
+    throw new Error(`Backend returned ${response.status}`);
+  }
+  const result = await response.json();
+  // Drives the toolbar icon: the viewer's only sign of what happened to this video.
+  // A failed analysis answers 200 with a status too, so it must not read as a verdict.
+  const state = result.status ? (result.status === "indexing" ? "working" : "failed") : "done";
+  setIndicator(tabId, state);
+  return result;
+}
+
+// One vote per (video_id, voter_id), so re-voting overwrites; returns the new tally.
+async function submitVote({ videoId, voterId, vote }) {
+  const response = await fetch(`${API_BASE_URL}/video/community-vote`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ video_id: videoId, voter_id: voterId, vote }),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  if (!response.ok) {
     throw new Error(`Backend returned ${response.status}`);
   }
   return response.json();
 }
 
-// Reads a STORED evaluation only. Deliberately GET, not the POST above: the
-// grid asks about every tile on screen, and POST queues analysis for anything
-// missing, so scrolling a feed would kick off a yt-dlp download plus Whisper
-// per thumbnail. A tile with no evaluation renders normally instead.
-async function storedEvaluation(videoId) {
-  const url = `${API_BASE_URL}/video/evaluation?video_id=${encodeURIComponent(videoId)}`;
-  const response = await fetch(url);
-  if (response.status === 404) return null; // not analyzed
-  if (!response.ok) throw new Error(`Backend returned ${response.status}`);
-  return response.json();
-}
-
-// --- GET_FACT_CHECK: the progressive fact-check bridge ------------------------------
-//
 // GET /video/fact-check?video_id= discriminates the states itself: 404 means
 // no evaluation row at all (still indexing, so keep polling); a 200 carries
 // either the bare ValidityReport dict (no top-level "status" key, so the
@@ -54,7 +76,7 @@ async function storedEvaluation(videoId) {
 // change the answer.
 async function getFactCheckStatus(videoId) {
   const url = `${API_BASE_URL}/video/fact-check?video_id=${encodeURIComponent(videoId)}`;
-  const response = await fetch(url);
+  const response = await fetch(url, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
   if (response.status === 404) return { stage: "fact_checking" };
   if (!response.ok) throw new Error(`Backend returned ${response.status}`);
 
@@ -66,136 +88,4 @@ async function getFactCheckStatus(videoId) {
     return { stage: "failed", detail: body.detail ?? null };
   }
   return { stage: "complete", report: body };
-}
-
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message?.type !== MESSAGE_TYPES.GET_FACT_CHECK) return false;
-
-  getFactCheckStatus(message.videoId)
-    .then((result) => sendResponse({ ok: true, ...result }))
-    .catch((error) => sendResponse({ ok: false, error: String(error) }));
-  return true;
-});
-
-// --- GET_EVALUATIONS: batch score lookup for the tile-grid AI filter ----------------
-//
-// There is no backend batch endpoint yet — the API only exposes
-// `GET /video/evaluation?video_id=`. A `POST /video/evaluations` accepting
-// `{video_ids: [...]}` and returning scores in one round trip would replace this
-// fan-out entirely; until Backend adds it, we fan out through a small bounded queue
-// so a 30-tile grid page doesn't fire 30 simultaneous requests. (Backend handoff.)
-
-// Score cache, keyed by video id. A scrolled-past tile that scrolls back into view is
-// never refetched. Unbounded for the lifetime of the service worker, which is fine for
-// real evaluations: the backend writes them offline, so a score never changes under us.
-//
-// A MISS is different. A video that 404s now can be analyzed by a dev minutes later
-// while this same worker is still warm, so caching "not analyzed" forever would pin the
-// tile as unfiltered for the rest of the session. Misses therefore get a short TTL.
-const scoreCache = new Map();
-const missExpiry = new Map();
-const MISS_TTL_MS = 60_000;
-
-// Promises for ids currently being fetched, so concurrent GET_EVALUATIONS calls for
-// the same id (e.g. two tabs, or a re-scan that races an in-flight one) share the one
-// request instead of each starting their own.
-const inFlight = new Map();
-
-// Bounded concurrency for the fan-out queue. The gate is module-level, not per call:
-// a mutation-observer rescan can overlap an in-flight navigation rescan with a disjoint
-// id set, and a per-call pool would let each have its own 4 workers.
-const MAX_CONCURRENT_LOOKUPS = 4;
-let activeLookups = 0;
-const waiting = [];
-
-function acquireSlot() {
-  if (activeLookups < MAX_CONCURRENT_LOOKUPS) {
-    activeLookups += 1;
-    return Promise.resolve();
-  }
-  return new Promise((resolve) => waiting.push(resolve));
-}
-
-function releaseSlot() {
-  const next = waiting.shift();
-  if (next) next();
-  else activeLookups -= 1;
-}
-
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message?.type !== MESSAGE_TYPES.GET_EVALUATIONS) return false;
-
-  getScores(Array.isArray(message.videoIds) ? message.videoIds : [])
-    .then((scores) => sendResponse({ ok: true, scores }))
-    .catch(() => sendResponse({ ok: true, scores: {} })); // never throw past the listener
-  return true;
-});
-
-async function getScores(videoIds) {
-  const uniqueIds = Array.from(new Set(videoIds.filter(Boolean)));
-  // Every lookup passes through the shared semaphore, so total in-flight fetches stay
-  // capped across overlapping GET_EVALUATIONS calls, not just within one.
-  await Promise.all(uniqueIds.map((id) => scoreFor(id)));
-
-  const scores = {};
-  for (const id of uniqueIds) scores[id] = scoreCache.has(id) ? scoreCache.get(id) : null;
-  return scores;
-}
-
-function isCached(videoId) {
-  if (!scoreCache.has(videoId)) return false;
-  const expiresAt = missExpiry.get(videoId);
-  if (expiresAt === undefined) return true; // a real score, cached for good
-  if (Date.now() < expiresAt) return true;
-  scoreCache.delete(videoId);
-  missExpiry.delete(videoId);
-  return false;
-}
-
-async function scoreFor(videoId) {
-  if (isCached(videoId)) return scoreCache.get(videoId);
-  if (inFlight.has(videoId)) return inFlight.get(videoId);
-
-  const promise = acquireSlot()
-    .then(() => lookupScore(videoId))
-    .then((score) => {
-      scoreCache.set(videoId, score);
-      if (score === null) missExpiry.set(videoId, Date.now() + MISS_TTL_MS);
-      else missExpiry.delete(videoId);
-      releaseSlot();
-      inFlight.delete(videoId);
-      return score;
-    });
-
-  inFlight.set(videoId, promise);
-  return promise;
-}
-
-// Cold-start layer, underneath the in-memory Map above: that Map is wiped
-// every time MV3 recycles this worker (~30s idle), so without this a
-// revisited video would re-fetch from the network every single time. The
-// persistent cache survives worker restarts, so it's checked first; a
-// successful network lookup (found OR a real "not analyzed" 404) is written
-// through so the next cold start is instant too.
-async function lookupScore(videoId) {
-  const persisted = await getCachedScore(videoId).catch(() => null);
-  if (persisted !== null) return persisted.score;
-
-  let evaluation;
-  try {
-    evaluation = await storedEvaluation(videoId);
-  } catch {
-    // Network error: same as "not analyzed" for this call, but NOT a
-    // successful lookup, so it isn't written through to the persistent miss
-    // cache - a transient backend outage shouldn't get pinned as a real miss.
-    return null;
-  }
-
-  const score = evaluation?.score ?? null;
-  const verdict = score === null ? null : (evaluation?.verdict ?? null);
-  await putCachedScore(videoId, { score, verdict }).catch(() => {
-    // Persistence is best-effort; the in-memory cache above still works this
-    // session even if chrome.storage is unavailable or over quota.
-  });
-  return score;
 }

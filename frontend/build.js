@@ -1,40 +1,45 @@
 import { build, context } from "esbuild";
-import { cpSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, watch as watchFiles, writeFileSync } from "node:fs";
 
 const watch = process.argv.includes("--watch");
 
 const options = {
   entryPoints: {
-    content: "src/content/index.js",
+    content: "src/content/index.jsx",
     background: "src/background/index.js",
+    popup: "src/popup/index.jsx",
   },
   bundle: true,
+  jsx: "automatic",
+  minify: true,
+  define: { "process.env.NODE_ENV": '"production"' },
   format: "iife",
   outdir: "dist",
   sourcemap: true,
   target: "chrome120",
 };
 
-// Every stylesheet the content script uses lives in src/content/ (overlay.css,
-// filter.css, factCheckCard.css, and whatever gets added next) - copy the
-// whole directory's .css files instead of hardcoding filenames one at a time,
-// which is what let filter.css silently never reach dist/ before.
-const CONTENT_CSS_DIR = "src/content";
+// Two stylesheets ship as files, because both have to apply before any script runs:
+// the tile decoration and the popup's own layout. The rest is styled-components.
+const styles = {
+  "dist/filter.css": "src/content/filter.css",
+  "dist/popup.css": "src/popup/popup.css",
+};
 
-const copyStatic = () => {
-  const cssFiles = readdirSync(CONTENT_CSS_DIR).filter((name) => name.endsWith(".css"));
-  for (const name of cssFiles) {
-    cpSync(join(CONTENT_CSS_DIR, name), join("dist", name));
-  }
+const buildStyles = () => {
+  for (const [out, source] of Object.entries(styles))
+    writeFileSync(out, readFileSync(source, "utf8"));
 };
 
 if (watch) {
   const ctx = await context(options);
   await ctx.watch();
-  copyStatic();
+  buildStyles();
+  watchFiles("src", { recursive: true }, (_event, file) => {
+    if (file?.endsWith(".css")) buildStyles();
+  });
   console.log("watching for changes...");
 } else {
   await build(options);
-  copyStatic();
+  buildStyles();
 }
