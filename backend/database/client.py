@@ -73,31 +73,14 @@ class EvaluationRepository:
             video = session.get(Video, video_id)
             return self._to_dict(video) if video else None
 
-    def find_scores_by_channel_id(
+    def find_by_channel_id(
         self, channel_id: str, exclude_video_id: str | None = None, limit: int = 50
     ) -> list[dict[str, Any]]:
-        """The two fields channel history reads, shaped like evaluations.
-
-        Hydrating full sibling rows deserializes each one's transcript and
-        fact-check report - megabytes per request once a channel has a few
-        analyzed videos - so the evaluation routes use this instead.
-        """
-        query = (
-            select(
-                func.json_extract(Video.data, "$.score"),
-                func.json_extract(Video.data, "$.metadata.publish_date"),
-            )
-            .where(Video.channel_id == channel_id)
-            .limit(limit)
-        )
+        query = select(Video).where(Video.channel_id == channel_id).limit(limit)
         if exclude_video_id:
             query = query.where(Video.video_id != exclude_video_id)
         with Session(get_engine()) as session:
-            return [
-                {"score": score, "metadata": {"publish_date": publish_date}}
-                for score, publish_date in session.execute(query).tuples()
-                if score is not None
-            ]
+            return [self._to_dict(video) for video in session.scalars(query)]
 
     def upsert(self, evaluation: dict[str, Any]) -> dict[str, Any]:
         now = _utcnow()

@@ -29,11 +29,6 @@ logger = logging.getLogger(__name__)
 
 MAX_OUTPUT_TOKENS = 4096
 RETRY_SLEEP_SECONDS = 2.0
-# Both SDKs default to 600s per attempt with automatic retries, which under
-# MAX_CONCURRENT_ANALYSES means one hung call can park an analysis slot for the
-# better part of an hour - two of them stop all indexing until a restart.
-LLM_TIMEOUT_SECONDS = 180.0
-LLM_MAX_RETRIES = 1
 
 # On a safety decline, the beta API re-runs the request on Anthropic's
 # recommended fallback model instead of failing outright (see
@@ -162,26 +157,17 @@ def _call_with_retry(call: Any, transient_errors: tuple[type[Exception], ...]) -
 
 @functools.cache
 def _openai_client() -> openai.OpenAI:
-    return openai.OpenAI(
-        api_key=config.openai_api_key,
-        timeout=LLM_TIMEOUT_SECONDS,
-        max_retries=LLM_MAX_RETRIES,
-    )
+    return openai.OpenAI(api_key=config.openai_api_key)
 
 
 @functools.cache
 def _gateway_client() -> openai.OpenAI:
-    return openai.OpenAI(
-        base_url=config.gateway_url,
-        api_key=config.browserbase_api_key,
-        timeout=LLM_TIMEOUT_SECONDS,
-        max_retries=LLM_MAX_RETRIES,
-    )
+    return openai.OpenAI(base_url=config.gateway_url, api_key=config.browserbase_api_key)
 
 
 @functools.cache
 def _anthropic_client() -> anthropic.Anthropic:
-    return anthropic.Anthropic(timeout=LLM_TIMEOUT_SECONDS, max_retries=LLM_MAX_RETRIES)
+    return anthropic.Anthropic()
 
 
 def _is_reasoning_model(model: str) -> bool:

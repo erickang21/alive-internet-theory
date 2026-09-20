@@ -134,10 +134,6 @@ def _validate_citations(
     kept: list[Citation] = []
     seen: set[tuple[int, str]] = set()
     dropped = 0
-    # Normalizing a full fetched page runs six regex passes over it, each an
-    # uninterruptible GIL hold; done per citation it stalls every API request
-    # thread in the process, so each source is normalized at most once.
-    normalized_pages: dict[int, str] = {}
     for raw in raw_citations:
         # The list itself can contain anything the model emitted, including bare
         # strings, so don't assume a dict before asking it for keys.
@@ -161,15 +157,12 @@ def _validate_citations(
         if not src.markdown:
             dropped += 1
             continue
-        if idx not in normalized_pages:
-            normalized_pages[idx] = normalize_for_match(src.markdown)
-        normalized_quote = normalize_for_match(quote)
-        if normalized_quote not in normalized_pages[idx]:
+        if normalize_for_match(quote) not in normalize_for_match(src.markdown):
             dropped += 1
             continue
         # Citing the same passage twice doesn't make it better evidence, but it
         # does inflate the citation count in the stored report.
-        fingerprint = (idx, normalized_quote)
+        fingerprint = (idx, normalize_for_match(quote))
         if fingerprint in seen:
             dropped += 1
             continue

@@ -116,17 +116,10 @@ function toPublic(record) {
   return record ? { score: record.score, verdict: record.verdict } : null;
 }
 
-// Only our own records: get(null) would also drag every fact-check record -
-// tens of KB each - through the service worker on every cached tile. getKeys
-// (Chrome 130+) makes the filter free; older Chromes fall back to the full read.
-async function readScoreRecords() {
+async function readAll() {
   const area = storageArea();
   if (!area) return Object.fromEntries(memoryStore);
   try {
-    if (typeof area.getKeys === "function") {
-      const keys = (await area.getKeys()).filter((key) => key.startsWith(SCORE_KEY_PREFIX));
-      return keys.length ? ((await area.get(keys)) ?? {}) : {};
-    }
     return (await area.get(null)) ?? {};
   } catch {
     return {};
@@ -220,7 +213,7 @@ export async function putCachedScore(videoId, { score, verdict } = {}) {
   // eviction, so the next write fails too, and the extension is wedged until
   // someone clears storage by hand.
   try {
-    const stale = keysToEvict(await readScoreRecords(), key);
+    const stale = keysToEvict(await readAll(), key);
     if (stale.length) await area.remove(stale);
   } catch {
     // Eviction is best-effort; a failure here must not block the write.
@@ -246,7 +239,7 @@ export async function clearScoreCache() {
     return;
   }
   try {
-    const all = await readScoreRecords();
+    const all = await readAll();
     const keys = Object.keys(all).filter((key) => key.startsWith(SCORE_KEY_PREFIX));
     if (keys.length) await area.remove(keys);
   } catch {

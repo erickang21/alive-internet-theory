@@ -16,13 +16,11 @@ const POLL_JITTER_MS = 2_000;
 // A service worker torn down mid-message can leave sendMessage pending for good, and a
 // poll that never settles never schedules the next one.
 const REPLY_TIMEOUT_MS = 25_000;
-// A request that hasn't answered by now counts as a silent trip. One alone proves
-// nothing - a cold service worker, the feed filter's lookups and an analysis run
-// all share this round trip, so a first answer past the deadline is congestion,
-// not an outage - but two in a row swap the skeleton for the error container.
-// It's a display deadline, not a timeout: the request is left alone, so a backend
-// that was only slow puts the skeleton (or the verdict) straight back, and a
-// request that fails outright still reports on the spot, evidence in hand.
+// A request that hasn't answered by now is treated as nothing running, and the error
+// container replaces the skeleton. This is a display deadline, not a timeout: the
+// request is left alone, so a backend that was only slow puts the skeleton (or the
+// verdict) straight back. Without it the skeleton would shimmer for up to
+// REQUEST_TIMEOUT_MS against a backend that accepts the connection and then hangs.
 const SILENCE_MS = 2_000;
 
 // The fact-check gets its own poll loop (30s cadence: a check takes minutes) and
@@ -33,8 +31,6 @@ const factCheckBridge = createFactCheckBridge();
 
 let currentVideoId = null;
 let pollTimer = null;
-// Consecutive polls that hit the silence deadline; any answer resets it.
-let silentTrips = 0;
 // Bumped every time polling stops. A request still in flight from the previous chain
 // can't render its answer or schedule another tick once a restart has taken over,
 // which the error container's retry makes reachable with one click.
@@ -112,9 +108,7 @@ async function restart(force) {
   showSkeleton();
   if (force) {
     try {
-      // ask(), not a bare sendMessage: a worker torn down mid-message would leave
-      // this await pending forever, and the poll below would never start.
-      await ask({ type: MESSAGE_TYPES.RERUN_EVALUATION, videoId });
+      await chrome.runtime.sendMessage({ type: MESSAGE_TYPES.RERUN_EVALUATION, videoId });
     } catch (error) {
       console.warn("[alive-internet-theory]", error);
     }
@@ -145,7 +139,6 @@ function stopPolling() {
   if (pollTimer !== null) clearTimeout(pollTimer);
   pollTimer = null;
   pollToken += 1;
-  silentTrips = 0;
 }
 
 async function poll(videoId, token, first = false) {
@@ -165,15 +158,11 @@ async function poll(videoId, token, first = false) {
 async function showEvaluation(videoId, token, first) {
   let result;
   const silent = setTimeout(() => {
-    // Stale first: a superseded chain's timer must not touch the live chain's count.
-    if (stale(videoId, token)) return;
-    silentTrips += 1;
-    if (silentTrips >= 2) showError("offline", "No answer from the backend.");
+    if (!stale(videoId, token)) showError("offline", "No answer from the backend.");
   }, SILENCE_MS);
   try {
     const response = await ask({ type: MESSAGE_TYPES.REQUEST_EVALUATION, videoId });
     if (stale(videoId, token)) return true;
-    silentTrips = 0;
     if (!response?.ok) {
       throw new Error(response?.error ?? "no response from service worker");
     }
@@ -189,36 +178,28 @@ async function showEvaluation(videoId, token, first) {
     clearTimeout(silent);
   }
 
-  // A throw below (a render or mount failure) must not escape: poll() has no timer
-  // scheduled yet, so an escaped exception would end the chain for good and leave
-  // whatever the card last showed frozen on screen.
-  try {
-    // An unanalyzed video comes back as a status, not an evaluation. The request itself
-    // has queued it for indexing, so the skeleton stays up until the verdict lands.
-    if (result.status === "indexing") {
-      showSkeleton();
-      return false;
-    }
-    if (result.status) {
-      showError("failed", result.detail);
-      // Nothing more is coming for this video, so the feed stops waiting on it.
-      releaseFeed();
-      return true;
-    }
-    showCard(
-      <Card
-        evaluation={result}
-        celebrate={!first}
-        floating={isFloating()}
-        factCheck={<FactCheck videoId={videoId} onRetry={() => factCheckBridge.retry(videoId)} />}
-      />,
-    );
-    releaseFeed();
-    return true;
-  } catch (error) {
-    console.warn("[alive-internet-theory]", error);
+  // An unanalyzed video comes back as a status, not an evaluation. The request itself
+  // has queued it for indexing, so the skeleton stays up until the verdict lands.
+  if (result.status === "indexing") {
+    showSkeleton();
     return false;
   }
+  if (result.status) {
+    showError("failed", result.detail);
+    // Nothing more is coming for this video, so the feed stops waiting on it.
+    releaseFeed();
+    return true;
+  }
+  showCard(
+    <Card
+      evaluation={result}
+      celebrate={!first}
+      floating={isFloating()}
+      factCheck={<FactCheck videoId={videoId} onRetry={() => factCheckBridge.retry(videoId)} />}
+    />,
+  );
+  releaseFeed();
+  return true;
 }
 
 // YouTube is an SPA: yt-navigate-finish fires on every in-app navigation,
