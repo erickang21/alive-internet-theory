@@ -2,7 +2,8 @@ import { MESSAGE_TYPES, RERUN_EVENT } from "../shared/constants.js";
 import { Card } from "../ui/Card.jsx";
 import { ErrorCard } from "../ui/ErrorCard.jsx";
 import { Skeleton } from "../ui/Skeleton.jsx";
-import { initFilter } from "./filter.js";
+import { initAutoAnalyze } from "./autoAnalyze.js";
+import { initFilter, rescanNow } from "./filter.js";
 import { hideCard, showCard } from "./mount.js";
 
 // Indexing runs in the backend, so keep asking while it does instead of making the
@@ -181,3 +182,4 @@ document.addEventListener("yt-page-data-updated", showCurrentVideo);
 document.addEventListener(RERUN_EVENT, () => restart(true));
 showCurrentVideo();
 initFilter();
+initAutoAnalyze(rescanNow);

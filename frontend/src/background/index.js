@@ -1,6 +1,6 @@
 import { API_BASE_URL, MESSAGE_TYPES } from "../shared/constants.js";
 import { setIndicator } from "./indicator.js";
-import { getScores } from "./scores.js";
+import { getScores, primeScore } from "./scores.js";
 
 // A request that never settles never calls sendResponse, leaving the content script
 // waiting for an answer that cannot arrive.
@@ -12,6 +12,7 @@ const HANDLERS = {
   [MESSAGE_TYPES.SUBMIT_VOTE]: submitVote,
   [MESSAGE_TYPES.GET_EVALUATIONS]: getScores,
   [MESSAGE_TYPES.CLEAR_INDICATOR]: async (_message, tabId) => setIndicator(tabId, "idle"),
+  [MESSAGE_TYPES.QUEUE_ANALYSIS]: ({ videoId }) => queueAnalysis(videoId),
 };
 
 // The service worker owns backend calls: its host_permissions exempt it from
@@ -47,6 +48,28 @@ async function requestEvaluation(videoId, tabId, force = false) {
   const state = result.status ? (result.status === "indexing" ? "working" : "failed") : "done";
   setIndicator(tabId, state);
   return result;
+}
+
+/** Queues one of the feed's videos, for the auto-analyze mode. Same POST as a watched
+ * video, so the backend indexes it if it isn't stored and answers the evaluation once it
+ * is — but deliberately without touching the toolbar icon, which describes the video the
+ * viewer is actually on, not the thirty tiles scrolling past it.
+ *
+ * Returns `{score}` once there is a verdict and `{status}` while there isn't. */
+async function queueAnalysis(videoId) {
+  const response = await fetch(`${API_BASE_URL}/video/evaluation`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ video_id: videoId, force: false }),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  if (!response.ok && response.status !== 202) {
+    throw new Error(`Backend returned ${response.status}`);
+  }
+  const result = await response.json();
+  if (result.status) return { status: result.status, detail: result.detail };
+  primeScore(videoId, result.score ?? null);
+  return { score: result.score ?? null };
 }
 
 // One vote per (video_id, voter_id), so re-voting overwrites; returns the new tally.

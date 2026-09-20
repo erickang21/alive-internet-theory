@@ -12,12 +12,14 @@ export const MESSAGE_TYPES = {
   GET_EVALUATIONS: "ait:get-evaluations",
   RERUN_EVALUATION: "ait:rerun-evaluation",
   CLEAR_INDICATOR: "ait:clear-indicator",
+  QUEUE_ANALYSIS: "ait:queue-analysis",
 };
 
 export const FILTER_STATES = ["off", "flag", "block"];
 export const DEFAULT_FILTER_STATE = "off";
 export const FILTER_STORAGE_KEY = "aitFilterState";
 export const DEBUG_STORAGE_KEY = "aitDebug";
+export const AUTO_ANALYZE_STORAGE_KEY = "aitAutoAnalyze";
 export const RERUN_EVENT = "ait-rerun";
 // Lower score = more AI, so a video is flagged or blocked when it scores below this.
 export const AI_FILTER_THRESHOLD = 45;

@@ -1,6 +1,6 @@
 import styled from "styled-components";
 
-import { useDebugMode, useFilterState } from "./hooks.js";
+import { useAutoAnalyze, useDebugMode, useFilterState } from "./hooks.js";
 import { bodyText, focusRing } from "./primitives.jsx";
 
 const Shell = styled.div`
@@ -92,6 +92,7 @@ function Switch({ label, on, disabled, nested, onToggle }) {
 /** `debugExtra` is revealed while debug mode is on: the panel's rerun button, or a hint. */
 export function Settings({ debugExtra }) {
   const [filter, setFilter] = useFilterState();
+  const [autoAnalyze, toggleAutoAnalyze] = useAutoAnalyze();
   const [debug, toggleDebug] = useDebugMode();
 
   return (
@@ -107,6 +108,11 @@ export function Settings({ debugExtra }) {
         on={filter === "block"}
         disabled={filter === "off"}
         onToggle={() => setFilter(filter === "block" ? "flag" : "block")}
+      />
+      <Switch
+        label="Analyze feed videos automatically"
+        on={autoAnalyze}
+        onToggle={toggleAutoAnalyze}
       />
       <Switch label="Debug mode" on={debug} onToggle={toggleDebug} />
       {debug && debugExtra}

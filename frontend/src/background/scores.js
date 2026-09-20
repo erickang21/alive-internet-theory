@@ -13,6 +13,12 @@ const inFlight = new Map();
 const waiting = [];
 let active = 0;
 
+/** Records a score the auto-analyze queue just learned, so the next feed rescan marks the
+ * tile straight away instead of waiting out this module's miss TTL. */
+export function primeScore(videoId, score) {
+  cache.set(videoId, { score, expires: Date.now() + MISS_TTL_MS });
+}
+
 export async function getScores({ videoIds }) {
   const ids = [...new Set((Array.isArray(videoIds) ? videoIds : []).filter(Boolean))];
   const scores = await Promise.all(ids.map(scoreFor));
