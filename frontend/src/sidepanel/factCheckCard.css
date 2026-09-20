@@ -1,0 +1,241 @@
+/* FactCheckCard. Self-contained and `ait-fc-` prefixed: it mounts beside other
+   stylesheets, so there are no resets, no bare element selectors, and no `*`. */
+
+.ait-fc {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  font-family: "Roboto", "Segoe UI", sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #f1f1f1;
+}
+
+.ait-fc[hidden] {
+  display: none;
+}
+
+.ait-fc-title {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #aaa;
+}
+
+/* --- pending ------------------------------------------------------------- */
+
+.ait-fc-pending-text {
+  color: #aaa;
+}
+
+.ait-fc-spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-top-color: #f1f1f1;
+  border-radius: 50%;
+  animation: ait-fc-spin 0.9s linear infinite;
+}
+
+@keyframes ait-fc-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ait-fc-spinner {
+    animation: none;
+  }
+}
+
+.ait-fc-skeleton {
+  margin-top: 8px;
+}
+
+.ait-fc-skeleton-bar {
+  height: 8px;
+  margin-bottom: 6px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #2a2a2a 25%, #363636 37%, #2a2a2a 63%);
+  background-size: 400% 100%;
+  animation: ait-fc-shimmer 1.4s ease infinite;
+}
+
+.ait-fc-skeleton-bar:nth-child(2) {
+  width: 80%;
+}
+.ait-fc-skeleton-bar:nth-child(3) {
+  width: 60%;
+}
+
+@keyframes ait-fc-shimmer {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0 50%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ait-fc-skeleton-bar {
+    animation: none;
+  }
+}
+
+/* --- complete ------------------------------------------------------------ */
+
+.ait-fc-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ait-fc-score {
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.ait-fc-score-high {
+  background: #1e4620;
+  color: #7ee787;
+}
+.ait-fc-score-good {
+  background: #23402a;
+  color: #9fd8a5;
+}
+.ait-fc-score-risk {
+  background: #4a3a10;
+  color: #f0c674;
+}
+.ait-fc-score-low {
+  background: #4c1a1a;
+  color: #ff7b72;
+}
+
+.ait-fc-rating {
+  font-weight: 600;
+}
+
+.ait-fc-low-confidence,
+.ait-fc-counts {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #aaa;
+}
+
+.ait-fc-toggle,
+.ait-fc-retry {
+  margin-top: 8px;
+  padding: 4px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  background: transparent;
+  color: #f1f1f1;
+  font: inherit;
+  cursor: pointer;
+}
+
+.ait-fc-toggle:hover,
+.ait-fc-retry:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.ait-fc-toggle:focus-visible,
+.ait-fc-retry:focus-visible {
+  outline: 2px solid #7aa2f7;
+  outline-offset: 2px;
+}
+
+/* --- claims -------------------------------------------------------------- */
+
+.ait-fc-verdicts {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ait-fc-verdict {
+  margin-bottom: 10px;
+  padding-left: 8px;
+  border-left: 3px solid #444;
+}
+
+.ait-fc-verdict-false {
+  border-left-color: #ff7b72;
+}
+.ait-fc-verdict-misleading {
+  border-left-color: #f0c674;
+}
+.ait-fc-verdict-verified_true,
+.ait-fc-verdict-mostly_true {
+  border-left-color: #7ee787;
+}
+
+.ait-fc-verdict-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #aaa;
+}
+
+.ait-fc-claim {
+  margin-top: 2px;
+  font-weight: 600;
+}
+
+.ait-fc-debunk {
+  margin-top: 2px;
+  color: #ddd;
+}
+
+.ait-fc-quote {
+  margin: 6px 0 2px;
+  padding-left: 8px;
+  border-left: 2px solid #555;
+  color: #bbb;
+  font-style: italic;
+}
+
+.ait-fc-source {
+  color: #7aa2f7;
+  text-decoration: none;
+  word-break: break-word;
+}
+
+.ait-fc-source:hover {
+  text-decoration: underline;
+}
+
+.ait-fc-domain {
+  margin-left: 6px;
+  font-size: 11px;
+  color: #888;
+}
+
+/* --- skipped / failed ---------------------------------------------------- */
+
+.ait-fc-skipped-title,
+.ait-fc-failed-title {
+  font-weight: 600;
+}
+
+.ait-fc-skipped-reason,
+.ait-fc-failed-message {
+  margin-top: 2px;
+  color: #aaa;
+}
+
+.ait-fc-failed-title {
+  color: #ff7b72;
+}

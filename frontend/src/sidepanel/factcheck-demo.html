@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fact-check card demo</title>
+    <link rel="stylesheet" href="./factCheckCard.css" />
+    <style>
+      body {
+        margin: 0;
+        padding: 24px;
+        background: #0e0e0e;
+        color: #eee;
+        font-family: "Segoe UI", Roboto, sans-serif;
+      }
+
+      h1 {
+        font-size: 16px;
+        margin: 0 0 4px;
+      }
+
+      .notice {
+        max-width: 760px;
+        margin: 0 0 20px;
+        padding: 10px 12px;
+        border: 1px solid #7aa2f7;
+        border-radius: 6px;
+        background: rgba(122, 162, 247, 0.1);
+        font-size: 13px;
+        line-height: 1.5;
+      }
+
+      .notice code {
+        background: rgba(255, 255, 255, 0.1);
+        padding: 1px 5px;
+        border-radius: 4px;
+      }
+
+      .layout {
+        display: flex;
+        gap: 24px;
+        align-items: flex-start;
+        flex-wrap: wrap;
+      }
+
+      .controls {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        min-width: 220px;
+      }
+
+      .controls button {
+        font: inherit;
+        font-size: 12px;
+        padding: 7px 10px;
+        border: 1px solid #444;
+        border-radius: 6px;
+        background: #1c1c1c;
+        color: #eee;
+        cursor: pointer;
+        text-align: left;
+      }
+
+      .controls button:hover {
+        background: #2a2a2a;
+      }
+
+      .controls button.sequence {
+        margin-top: 10px;
+        border-color: #7aa2f7;
+        color: #7aa2f7;
+      }
+
+      /* --- fake extension sidebar, ~320px, matching the real host panel --- */
+
+      .panel {
+        width: 320px;
+        flex: none;
+        padding: 14px;
+        border-radius: 10px;
+        background: #181818;
+        border: 1px solid #2a2a2a;
+      }
+
+      .ai-likelihood {
+        padding-bottom: 10px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+      }
+
+      .ai-likelihood-title {
+        margin: 0 0 6px;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: #aaa;
+      }
+
+      .ai-likelihood-verdict {
+        display: inline-block;
+        padding: 3px 10px;
+        border-radius: 999px;
+        font-size: 13px;
+        font-weight: 600;
+        background: #23402a;
+        color: #9fd8a5;
+      }
+
+      .ai-likelihood-note {
+        margin-top: 4px;
+        font-size: 12px;
+        color: #aaa;
+      }
+
+      /* The fact-check card mounts here, below the AI-likelihood block, to
+         show it appends progressively rather than replacing anything. */
+      #card-mount {
+        display: contents;
+      }
+
+      .side {
+        min-width: 320px;
+        max-width: 480px;
+        flex: 1 1 360px;
+      }
+
+      .side h2 {
+        font-size: 13px;
+        margin: 0 0 6px;
+      }
+
+      pre#json-view {
+        margin: 0 0 16px;
+        padding: 10px;
+        max-height: 320px;
+        overflow: auto;
+        background: #141414;
+        border: 1px solid #2a2a2a;
+        border-radius: 6px;
+        font-size: 11px;
+        line-height: 1.5;
+      }
+
+      #log {
+        margin: 0;
+        padding: 10px;
+        max-height: 160px;
+        overflow: auto;
+        background: #141414;
+        border: 1px solid #2a2a2a;
+        border-radius: 6px;
+        font-size: 11px;
+        list-style: none;
+      }
+
+      #log li {
+        margin-bottom: 4px;
+        color: #9fd8a5;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>FactCheckCard review harness</h1>
+    <p class="notice">
+      This page must be <strong>served</strong>, not opened from disk: Chrome blocks
+      <code>&lt;script type="module"&gt;</code> over <code>file://</code>. Run
+      <code>npm run demo</code> from <code>frontend/</code> and open the URL it prints.
+    </p>
+
+    <div class="layout">
+      <div class="controls">
+        <button data-state="idle">idle</button>
+        <button data-state="checking_eligibility">checking_eligibility</button>
+        <button data-state="fact_checking">fact_checking</button>
+        <button data-state="complete">complete (mixed report)</button>
+        <button data-state="complete_null">complete (null score)</button>
+        <button data-state="skipped_category">skipped_fiction (category)</button>
+        <button data-state="skipped_fallback">skipped_fiction (couldn't classify)</button>
+        <button data-state="failed_retryable">failed (retryable)</button>
+        <button data-state="failed_final">failed (not retryable)</button>
+        <button class="sequence" data-sequence="1">Run the full sequence</button>
+      </div>
+
+      <div class="panel">
+        <div class="ai-likelihood">
+          <div class="ai-likelihood-title">AI likelihood</div>
+          <span class="ai-likelihood-verdict">Likely human</span>
+          <div class="ai-likelihood-note">Fixed placeholder — not part of this component.</div>
+        </div>
+        <div id="card-mount"></div>
+      </div>
+
+      <div class="side">
+        <h2>Current record</h2>
+        <pre id="json-view">null</pre>
+        <h2>onRetry log</h2>
+        <ul id="log"></ul>
+      </div>
+    </div>
+
+    <script type="module">
+      import { createFactCheckCard } from "./FactCheckCard.js";
+
+      const jsonView = document.getElementById("json-view");
+      const log = document.getElementById("log");
+      const mount = document.getElementById("card-mount");
+
+      function logLine(text) {
+        const item = document.createElement("li");
+        item.textContent = `${new Date().toLocaleTimeString()} — ${text}`;
+        log.prepend(item);
+      }
+
+      const card = createFactCheckCard({
+        onRetry: (videoId) => logLine(`onRetry("${videoId}") fired`),
+      });
+      card.mount(mount, undefined);
+
+      function show(record) {
+        card.update(record);
+        jsonView.textContent = record ? JSON.stringify(record, null, 2) : "null";
+      }
+
+      const VIDEO_ID = "dQw4w9WgXcQ";
+      const now = () => new Date().toISOString();
+
+      function baseRecord(overrides) {
+        return {
+          videoId: VIDEO_ID,
+          stage: "idle",
+          updatedAt: now(),
+          schemaVersion: 1,
+          pregate: null,
+          result: null,
+          error: null,
+          ...overrides,
+        };
+      }
+
+      const RECORDS = {
+        idle: baseRecord({ stage: "idle" }),
+        checking_eligibility: baseRecord({ stage: "checking_eligibility" }),
+        fact_checking: baseRecord({ stage: "fact_checking" }),
+        complete: baseRecord({
+          stage: "complete",
+          result: {
+            validityScore: 72.5,
+            rating: "Mostly Reliable",
+            lowConfidence: false,
+            claimCount: 4,
+            verifiableCount: 4,
+            countsByStatus: { verified_true: 2, mostly_true: 1, false: 1 },
+            verdicts: [
+              {
+                claimId: "c1",
+                claimText: "The Great Wall of China is visible from space with the naked eye.",
+                timestampS: 42,
+                status: "false",
+                debunk:
+                  "NASA and multiple astronauts have stated the wall is not distinguishable from low Earth orbit without aid.",
+                citations: [
+                  {
+                    title: "NASA — Is the Great Wall of China Visible from Space?",
+                    domain: "nasa.gov",
+                    url: "https://www.nasa.gov/vision/space/workinginspace/great_wall.html",
+                    quote:
+                      "The Great Wall of China is almost impossible to see from the Space Shuttle, so it would be quite a stretch to see it from the moon.",
+                  },
+                ],
+              },
+              {
+                claimId: "c2",
+                claimText: "Water boils at 100°C at sea level.",
+                timestampS: 95,
+                status: "verified_true",
+                debunk: null,
+                citations: [],
+              },
+              {
+                claimId: "c3",
+                claimText: "The unemployment rate dropped for the third straight quarter.",
+                timestampS: 130,
+                status: "mostly_true",
+                debunk: null,
+                citations: [
+                  {
+                    title: "Bureau of Labor Statistics report",
+                    domain: "bls.gov",
+                    url: "https://www.bls.gov/",
+                    quote: "The unemployment rate declined for the third consecutive quarter.",
+                  },
+                ],
+              },
+              {
+                claimId: "c4",
+                claimText: "The company was founded in 1998.",
+                timestampS: null,
+                status: "verified_true",
+                debunk: null,
+                citations: [],
+              },
+            ],
+          },
+        }),
+        complete_null: baseRecord({
+          stage: "complete",
+          result: {
+            validityScore: null,
+            rating: "Insufficient Verifiable Data",
+            lowConfidence: true,
+            claimCount: 2,
+            verifiableCount: 0,
+            countsByStatus: { unverifiable: 2 },
+            verdicts: [
+              {
+                claimId: "c1",
+                claimText: "My grandmother always said this trick works.",
+                timestampS: 12,
+                status: "unverifiable",
+                debunk: null,
+                citations: [],
+              },
+              {
+                claimId: "c2",
+                claimText: "This is the best way to do it, in my experience.",
+                timestampS: 30,
+                status: "unverifiable",
+                debunk: null,
+                citations: [],
+              },
+            ],
+          },
+        }),
+        skipped_category: baseRecord({
+          stage: "skipped_fiction",
+          pregate: {
+            isEligible: false,
+            category: "Gaming",
+            reason: "This video is gameplay commentary, not factual content.",
+            source: "category",
+          },
+        }),
+        skipped_fallback: baseRecord({
+          stage: "skipped_fiction",
+          pregate: {
+            isEligible: false,
+            category: "unknown",
+            reason: "We couldn't confidently classify this video's content.",
+            source: "fallback",
+          },
+        }),
+        failed_retryable: baseRecord({
+          stage: "failed",
+          error: {
+            message: "The fact-check service timed out. This is usually temporary.",
+            retryable: true,
+          },
+        }),
+        failed_final: baseRecord({
+          stage: "failed",
+          error: {
+            message: "This video has no transcript available to fact-check.",
+            retryable: false,
+          },
+        }),
+      };
+
+      for (const button of document.querySelectorAll("button[data-state]")) {
+        button.addEventListener("click", () => show(RECORDS[button.dataset.state]));
+      }
+
+      const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+      document.querySelector("button[data-sequence]").addEventListener("click", async () => {
+        show(RECORDS.idle);
+        await delay(500);
+        show(RECORDS.checking_eligibility);
+        await delay(1200);
+        show(RECORDS.fact_checking);
+        await delay(1800);
+        show(RECORDS.complete);
+      });
+
+      show(RECORDS.idle);
+    </script>
+  </body>
+</html>
