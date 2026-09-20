@@ -170,6 +170,12 @@ def _anthropic_client() -> anthropic.Anthropic:
     return anthropic.Anthropic()
 
 
+def _is_reasoning_model(model: str) -> bool:
+    """OpenAI reasoning models accept (and need) reasoning_effort; gpt-4o etc. reject it."""
+    name = model.lower()
+    return name.startswith("gpt-5") or name.startswith(("o1", "o3", "o4"))
+
+
 def _complete_openai_compatible(
     client: openai.OpenAI,
     system: str,
@@ -178,6 +184,15 @@ def _complete_openai_compatible(
     schema_name: str,
     max_output_tokens: int,
 ) -> dict[str, Any]:
+    # Reasoning models (gpt-5, o-series) spend max_completion_tokens on hidden
+    # reasoning first, so our modest output budgets (extraction 4000, verify
+    # 1200) get fully consumed before any content is emitted — the response
+    # comes back finish_reason="length" with empty content. "minimal" effort
+    # zeroes the reasoning spend, which is plenty for these schema-shaped calls.
+    extra: dict[str, Any] = {}
+    if _is_reasoning_model(config.factcheck_model):
+        extra["reasoning_effort"] = "minimal"
+
     def _call() -> Any:
         return client.chat.completions.create(
             model=config.factcheck_model,
@@ -190,6 +205,7 @@ def _complete_openai_compatible(
                 "json_schema": {"name": schema_name, "strict": True, "schema": schema},
             },
             max_completion_tokens=max_output_tokens,
+            **extra,
         )
 
     response = _call_with_retry(_call, TRANSIENT_OPENAI_ERRORS)
