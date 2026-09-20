@@ -77,7 +77,7 @@ Videos that already have an evaluation are skipped unless you pass `--force`. Th
 For each video it:
 1. Downloads the captions, thumbnail, and yt-dlp's full metadata (`video.info.json`) to `MEDIA_DIR/<video_id>/`. The video itself isn't downloaded.
 2. Uses the first 5 minutes of the captions as the transcript. If there are none, it downloads the audio, cuts it to the first 5 minutes, and transcribes it locally with Whisper. The first Whisper run downloads about 460 MB of model weights.
-3. Scores the video: GPTZero, the ElevenLabs voice check, filler words, upload cadence, and channel age. The voice check needs audio, so a captioned video downloads a 60-second excerpt for it and deletes it again once scored. Claude also decides whether the video is educational and, if so, fact-checks its main thesis with web search. The first video from a channel also pulls exact dates for the channel's latest 20 uploads and its oldest one. That takes up to about a minute and is cached for 24 hours.
+3. Scores the video: GPTZero, the ElevenLabs voice check, filler words, upload cadence, and channel age. The voice check needs audio, so a captioned video downloads a 60-second excerpt for it and deletes it again once scored. Claude also decides whether the video is educational and, if so, fact-checks its main thesis with web search. The first video from a channel also pulls exact dates for the channel's latest 19 uploads and its oldest one. That takes up to about a minute and is cached for 24 hours.
 
 ### 3. Run the API
 

@@ -74,7 +74,7 @@ xargs docker compose exec -T backend python -m backend.analyze < videos.txt
 The script exits non-zero if any video failed, and logs why.
 
 **Expect these one-time delays:**
-- **First video from a new channel:** up to about a minute, while it pulls exact dates for the channel's latest 20 uploads and its oldest one. This is cached for 24 hours.
+- **First video from a new channel:** up to about a minute, while it pulls exact dates for the channel's latest 19 uploads and its oldest one. This is cached for 24 hours.
 - **First video without captions:** downloads about 460 MB of Whisper model weights.
 
 Each stage prints a timestamped line: the queue size, `[2/7] <id>: starting`, metadata, download progress, which transcript source was used, each criterion as it runs and its result, the channel-date fetch (`channel: 10/21 upload dates fetched`), and `[2/7] <id>: done in 45s, likely_human (score 88.2)`. The run ends with `finished: N analyzed, N skipped, N failed`.

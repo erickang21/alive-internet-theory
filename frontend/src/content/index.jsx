@@ -3,7 +3,7 @@ import { Card } from "../ui/Card.jsx";
 import { ErrorCard } from "../ui/ErrorCard.jsx";
 import { FactCheck } from "../ui/FactCheck.jsx";
 import { Skeleton } from "../ui/Skeleton.jsx";
-import { initAutoAnalyze } from "./autoAnalyze.js";
+import { holdFeed, initAutoAnalyze, releaseFeed } from "./autoAnalyze.js";
 import { createFactCheckBridge } from "./factCheckBridge.js";
 import { initFilter, rescanNow } from "./filter.js";
 import { hideCard, showCard } from "./mount.js";
@@ -84,11 +84,16 @@ async function showCurrentVideo() {
   if (!videoId) {
     factCheckBridge.stop();
     hideCard();
+    // A feed, search or channel page has no video to wait on, so the queue runs freely.
+    releaseFeed();
     return;
   }
   // start() tears down the previous video's loop first, so a navigation can
   // never leave two bridges writing records.
   factCheckBridge.start(videoId);
+  // This video gets the backend to itself until it has an answer; the feed's tiles are
+  // still collected meanwhile and go out once it does.
+  holdFeed();
   // The request goes out with the page, so the skeleton goes up with it: the card is
   // never missing while an answer is on its way.
   showSkeleton();
@@ -102,6 +107,8 @@ async function restart(force) {
   if (!videoId) return;
   stopPolling();
   const token = pollToken;
+  // Back to an unanswered video, so the feed waits again.
+  holdFeed();
   showSkeleton();
   if (force) {
     try {
@@ -194,6 +201,8 @@ async function showEvaluation(videoId, token, first) {
     }
     if (result.status) {
       showError("failed", result.detail);
+      // Nothing more is coming for this video, so the feed stops waiting on it.
+      releaseFeed();
       return true;
     }
     showCard(
@@ -204,6 +213,7 @@ async function showEvaluation(videoId, token, first) {
         factCheck={<FactCheck videoId={videoId} onRetry={() => factCheckBridge.retry(videoId)} />}
       />,
     );
+    releaseFeed();
     return true;
   } catch (error) {
     console.warn("[alive-internet-theory]", error);

@@ -17,6 +17,9 @@ let rescanFeed = () => {};
 let observer = null;
 let stopWatchingTiles = null;
 let retryTimer = null;
+// Set while the video the viewer is actually on has no verdict yet. Tiles keep being
+// collected, they just aren't sent, so the watched video gets the backend to itself.
+let held = false;
 
 // Every id queued since the mode was last turned on, so a tile scrolling past twice is
 // only sent once.
@@ -55,6 +58,12 @@ function stop() {
   retryTimer = null;
   // Forget what was queued, so turning the mode back on sweeps the feed again rather
   // than skipping every tile already on the page. A stored video costs one read.
+  clearQueue();
+}
+
+// In-flight sends are deliberately not counted here: they cannot be recalled, and they
+// unwind `inFlight` themselves when they settle.
+function clearQueue() {
   queued.clear();
   waiting.length = 0;
   indexing.clear();
@@ -79,8 +88,28 @@ function onIntersect(entries) {
   pump();
 }
 
+/** Called when the viewer moves to a new video. Two things happen, both about not
+ * spending the backend on the wrong thing: whatever was queued for the page just left is
+ * dropped, since those tiles are gone, and nothing more is sent until the new video has
+ * its own verdict. The backend runs two analyses at a time, so without the hold a watch
+ * page's up-next tiles take slots from the video the viewer is actually waiting on. */
+export function holdFeed() {
+  held = true;
+  // Start the new page over. Re-asking about a video that turns out to be analyzed
+  // already is one read, which is cheaper than finishing a queue nobody can see.
+  clearQueue();
+}
+
+/** Called once the watched video has a verdict or has definitively failed, and on any
+ * page that has no watched video to wait for. The backlog collected meanwhile drains. */
+export function releaseFeed() {
+  if (!held) return;
+  held = false;
+  pump();
+}
+
 function pump() {
-  while (enabled && inFlight < MAX_IN_FLIGHT && waiting.length) {
+  while (enabled && !held && inFlight < MAX_IN_FLIGHT && waiting.length) {
     void send(waiting.shift());
   }
 }
