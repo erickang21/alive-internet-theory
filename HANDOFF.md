@@ -2,9 +2,11 @@
 
 Written for whoever picks up this branch next. State as of 2026-09-20.
 
-Pushed through `44bcaee`. Steps 1–3 are done, verified and on the remote.
-Steps 4–5 were in progress when this was written; see "In flight" below before
-you touch the working tree.
+Pushed through `2ae1d3c`. The extension side is complete and verified:
+**211 frontend tests, 238 backend tests, `eslint` clean, working tree clean.**
+
+One blocking backend change remains before this branch is shippable — see
+"Remaining work" below. Start there.
 
 ## What this branch does
 
@@ -22,6 +24,8 @@ different questions, which is why the `fact_check` breakdown entry stays
 | `fa68082` | Merge of `origin/main`. 3 conflicts resolved. |
 | `6352c49` | Persistent `aitScore:` cache (`frontend/src/shared/scoreCache.js`). |
 | `44bcaee` | Pre-gate now gates the fact-check engine. |
+| `4cb0b14` | This document. |
+| `2ae1d3c` | Fact-check card mounted + the bridge that feeds it; CSS delivery fixed. |
 
 ### Two bugs found on `main` during the merge, both fixed here
 
@@ -52,22 +56,33 @@ One behaviour change worth knowing: the gate runs *before* the credentials
 check, so a sub-40-word transcript now short-circuits as `insufficient_signal`
 rather than reporting missing credentials.
 
-## In flight (uncommitted when this was written)
+### What the card + bridge commit does (`2ae1d3c`)
 
-A subagent was building steps 4 + 5 together — the card is inert without the
-bridge, so they don't split. Untracked/modified files you may find:
+The card had no data source — **nothing** wrote `aitFactCheck:<videoId>` records,
+so it would have sat at `idle` forever however well the UI worked.
 
-```
-frontend/src/content/factCheckBridge.js       + .test.js     NEW
-frontend/src/content/factCheckMount.js        + .test.js     NEW
-frontend/src/content/factCheckCard.css        moved from src/sidepanel/
-frontend/src/content/filterCssSync.test.js    DELETED (intentional)
-frontend/build.js, manifest.json              CSS delivery fix
-```
+- `frontend/src/content/factCheckBridge.js` — polls the backend, maps the
+  response to a stage, writes the record. Its tests read back through the real
+  `factCheckState` module (`getFactCheckState("v1").stage`), so "it writes
+  records" is proven end-to-end rather than asserted against a mock.
+- `frontend/src/content/factCheckMount.js` — per-video lifecycle. One video
+  mounted at a time; tears down card, subscription and timer before starting
+  the next, so a fast navigation can't leave two bridges writing.
+- CSS delivery fixed **at the cause**: `build.js` globs `src/content/*.css`,
+  the manifest registers them, and the inline `FILTER_CSS` duplicate plus its
+  drift-guard test are deleted. Net deletion, not a third copy of the workaround.
+  Verified by building clean and cross-checking all five manifest-referenced
+  files exist in `dist/`.
 
-**Treat this as unreviewed.** It had not yet made the backend route change
-described below, so committing it as-is would bake in the fiction-polls-forever
-bug. Either finish it or `git checkout -- .` and redo step 4+5 from the spec.
+This was written by a subagent that stalled mid-edit. Its production code was
+complete and correct; what it hadn't finished was a **test-isolation** fix:
+`factCheckMount.js` keeps module-level singleton state, and `index.test.js`
+gives each test a fresh `index.js` via a `?case=` query-string import — which
+does *not* give it a fresh `factCheckMount.js`, since the module cache is keyed
+per specifier. A second test reusing the same video id therefore hit the
+`videoId === mountedVideoId` early return and never started its bridge.
+`teardownGlobals()` now calls `unmountFactCheck()` first, while the fake DOM
+still exists. Worth knowing if you add tests here: same trap, same fix.
 
 ## Remaining work
 
@@ -107,7 +122,7 @@ Every other backend module has one. The routes have none, which is exactly why
 the gap above survived. Add `backend/tests/test_routes.py` covering all four
 cases in that table.
 
-### 3. Frontend: don't reuse the existing poll loop for the fact-check
+### 3. DONE — but don't undo it: the fact-check must not share the poll loop
 
 `poll()` in `frontend/src/content/index.js:188-192` unschedules itself
 permanently the moment `showEvaluation()` returns true. The AI score is stored
@@ -122,20 +137,16 @@ condition is `complete` / `skipped_fiction` / `failed`. Both timers must be
 independently cancelled on `yt-navigate-finish`, or a stale timer writes records
 for the previous video.
 
-Regression test to pin it: a video whose evaluation resolves immediately but
-whose fact-check is still pending **must** be polled again.
+This is how it's built now, and it's pinned by a regression test: *"the
+fact-check bridge keeps polling after the AI-score poll settles on tick 1"* in
+`index.test.js`. If that test ever starts looking redundant, it isn't.
 
-### 4. Verify before committing step 4+5
+### 4. Fresh review of the whole chain
 
-Two load-bearing claims, neither of which reading the diff will prove:
-
-- **The bridge actually writes `aitFactCheck:<videoId>` records.** Nothing wrote
-  them before step 5. If this is wrong the card sits at `idle` forever no matter
-  how good everything else is.
-- **`npm run build`, then list `dist/` and cross-check every file named in
-  `manifest.json` actually exists there.** The CSS change edits both sides.
-
-### 5. Then: fresh-subagent review of the whole chain
+Steps 1–5 have not had a single reviewer look at them end to end. The individual
+pieces were each verified, but the seams between them are where the one real
+defect so far turned up (step 3 ↔ step 5, item 1 above) — so review the seams,
+not just the modules.
 
 ## Open decisions / known debt
 
