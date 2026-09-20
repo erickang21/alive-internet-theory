@@ -15,6 +15,12 @@ export function initFilter() {
   rescan();
 }
 
+/** Repaints the feed from the scores stored now. The auto-analyze queue calls this when a
+ * verdict lands, since nothing about the page itself changed to trigger a rescan. */
+export function rescanNow() {
+  void rescan();
+}
+
 async function rescan(tiles) {
   if ((await getFilterState()) === "off") {
     clearFilter();

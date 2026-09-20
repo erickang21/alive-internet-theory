@@ -3,8 +3,9 @@ import { Card } from "../ui/Card.jsx";
 import { ErrorCard } from "../ui/ErrorCard.jsx";
 import { FactCheck } from "../ui/FactCheck.jsx";
 import { Skeleton } from "../ui/Skeleton.jsx";
+import { initAutoAnalyze } from "./autoAnalyze.js";
 import { createFactCheckBridge } from "./factCheckBridge.js";
-import { initFilter } from "./filter.js";
+import { initFilter, rescanNow } from "./filter.js";
 import { hideCard, showCard } from "./mount.js";
 
 // Indexing runs in the backend, so keep asking while it does instead of making the
@@ -200,3 +201,4 @@ document.addEventListener("yt-page-data-updated", showCurrentVideo);
 document.addEventListener(RERUN_EVENT, () => restart(true));
 showCurrentVideo();
 initFilter();
+initAutoAnalyze(rescanNow);

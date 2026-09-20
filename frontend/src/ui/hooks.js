@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
+import { getAutoAnalyze, setAutoAnalyze, subscribeAutoAnalyze } from "../shared/autoAnalyze.js";
 import { DEBUG_STORAGE_KEY, MESSAGE_TYPES, VERDICTS } from "../shared/constants.js";
 import { getFilterState, setFilterState, subscribeFilterState } from "../shared/filterState.js";
 
@@ -66,6 +67,22 @@ export function useFilterState() {
     return subscribeFilterState(setState);
   }, []);
   return [state, setFilterState];
+}
+
+/** Whether the feed's videos are queued for analysis as they scroll past. */
+export function useAutoAnalyze() {
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    getAutoAnalyze().then(setOn).catch(warn);
+    return subscribeAutoAnalyze(setOn);
+  }, []);
+  const toggle = useCallback(() => {
+    setOn((previous) => {
+      void setAutoAnalyze(!previous);
+      return !previous;
+    });
+  }, []);
+  return [on, toggle];
 }
 
 export function useDebugMode() {

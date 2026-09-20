@@ -6,10 +6,16 @@ logger = logging.getLogger(__name__)
 PENDING = "pending"
 DONE = "done"
 
+# An analysis downloads from YouTube, may run Whisper, and calls GPTZero and Claude, all
+# from one residential IP. A feed being auto-analyzed queues dozens of videos at once, so
+# they wait for a slot here rather than running together and getting the IP bot-checked.
+MAX_CONCURRENT_ANALYSES = 2
+
 _lock = threading.Lock()
 # video_id -> PENDING, DONE, or the failure detail. In-memory on purpose:
 # restarting the backend clears failures so those videos get another attempt.
 _jobs: dict[str, str] = {}
+_slots = threading.Semaphore(MAX_CONCURRENT_ANALYSES)
 
 
 def request(video_id: str, force: bool = False) -> str:
@@ -30,6 +36,13 @@ def is_pending(video_id: str) -> bool:
 
 
 def _run(video_id: str) -> None:
+    # Queued threads park here, so a video stays PENDING from the caller's point of view
+    # whether it is waiting for a slot or already downloading.
+    with _slots:
+        _analyze(video_id)
+
+
+def _analyze(video_id: str) -> None:
     # Imported here so the API doesn't load Whisper until a video needs it.
     from backend.analyze import analyze_video
 
