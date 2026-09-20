@@ -1,13 +1,13 @@
 // Applies the tri-state AI filter's visual decoration to YouTube video tiles.
 //
-// LOWER score = MORE AI (scoring starts at 100, deductions subtract). A tile is only
-// ever eligible for "flag"/"block" decoration when its score is a number below
-// AI_FILTER_THRESHOLD. `score === null` (not analyzed yet) always renders normally —
-// on a fresh machine that's nearly every tile, so getting this backwards would hide
-// or flag the entire feed instead of the rare AI one.
+// LOWER score = MORE AI (scoring starts at 100, deductions subtract). With the filter
+// on, every analyzed tile gets a preview label for its score band; only a score below
+// AI_FILTER_THRESHOLD is ever hidden by "block". `score === null` (not analyzed yet)
+// always renders normally — on a fresh machine that's nearly every tile, so getting
+// this backwards would label or hide the entire feed.
 //
 // Idempotency contract: each tile we touch is marked with
-// `data-ait-filter-applied="<off|flag|block>"` holding the DECORATION actually applied
+// `data-ait-filter-applied="<off|flag:<tone>|block>"` holding the DECORATION actually applied
 // to that tile (not necessarily the raw global filter state passed in — a tile with a
 // null/high score is marked "off" even while the global state is "block", because it
 // was never decorated). Re-running applyFilter with unchanged inputs is then a no-op
@@ -21,57 +21,18 @@ const THUMB_POSITIONED_CLASS = "ait-thumb-positioned";
 const HIDDEN_CLASS = "ait-filtered-hidden";
 const BADGE_CLASS = "ait-flag-badge";
 const INLINE_CLASS = "ait-flag-inline";
-const STYLE_ID = "ait-filter-style";
 
-// build.js does not copy filter.css into dist (see the note at the top of that file),
-// and this agent is scoped out of editing build.js/manifest.json to register it there.
-// As a stopgap this is an inline copy of filter.css, injected once as a <style> tag so
-// the feature works without a build change. Keep this string in sync with filter.css.
-const FILTER_CSS = `
-.ait-filtered-hidden {
-  display: none !important;
-}
-.ait-thumb-positioned {
-  position: relative;
-}
-.ait-flag-badge {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  z-index: 9999;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: #4c1a1a;
-  color: #ff7b72;
-  font-family: "Roboto", "Segoe UI", sans-serif;
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1.4;
-  white-space: nowrap;
-  pointer-events: none;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
-}
-.ait-flag-inline {
-  display: inline-block;
-  margin-left: 6px;
-  color: #ff7b72;
-  font-size: 12px;
-  vertical-align: middle;
-}
-`;
+// 45 and 75 are the backend's verdict thresholds; 90 splits off the clear-cut humans.
+const BANDS = [
+  { min: 90, label: "Human", tone: "human" },
+  { min: 75, label: "Likely Human", tone: "likely-human" },
+  { min: AI_FILTER_THRESHOLD, label: "Likely AI", tone: "likely-ai" },
+  { min: -Infinity, label: "AI", tone: "ai" },
+];
 
-function ensureStyleInjected() {
-  if (typeof document === "undefined" || typeof document.getElementById !== "function") return;
-  if (document.getElementById(STYLE_ID)) return;
-  const style = document.createElement("style");
-  style.id = STYLE_ID;
-  style.textContent = FILTER_CSS;
-  const target = document.head || document.documentElement || document.body;
-  target?.appendChild(style);
-}
-
-function isFilterable(score) {
-  return typeof score === "number" && !Number.isNaN(score) && score < AI_FILTER_THRESHOLD;
+function bandFor(score) {
+  if (typeof score !== "number" || Number.isNaN(score)) return null;
+  return BANDS.find((band) => score >= band.min);
 }
 
 // Removes every visual trace of our decoration from a single tile, but leaves the
@@ -87,17 +48,17 @@ function stripDecoration(tile) {
   tile.classList?.remove(HIDDEN_CLASS);
 }
 
-function decorateFlag(tile) {
+function decorateFlag(tile, band) {
   const thumb = getThumbnailElement(tile);
   if (thumb) {
     thumb.classList?.add(THUMB_POSITIONED_CLASS);
     const badge = document.createElement("span");
-    badge.className = BADGE_CLASS;
-    badge.textContent = "AI?";
+    badge.className = `${BADGE_CLASS} ${BADGE_CLASS}--${band.tone}`;
+    badge.textContent = band.label;
     thumb.appendChild(badge);
   }
 
-  const title = getTitleElement(tile);
+  const title = band.tone === "ai" ? getTitleElement(tile) : null;
   if (title) {
     const icon = document.createElement("span");
     icon.className = INLINE_CLASS;
@@ -112,28 +73,27 @@ function decorateBlock(tile) {
 
 // tilesWithScores: [{ tile, videoId, score }] — score is a number or null.
 export function applyFilter(state, tilesWithScores) {
-  ensureStyleInjected();
-
   for (const entry of tilesWithScores ?? []) {
     const tile = entry?.tile;
     if (!tile) continue;
 
-    const filterable = isFilterable(entry.score);
-    const desired = filterable && (state === "flag" || state === "block") ? state : "off";
+    const band = state === "flag" || state === "block" ? bandFor(entry.score) : null;
+    const blocked = state === "block" && band?.tone === "ai";
+    const desired = !band ? "off" : blocked ? "block" : `flag:${band.tone}`;
     const current = tile.getAttribute?.(APPLIED_ATTR) ?? null;
     if (current === desired) continue; // already in the right visual state
 
     stripDecoration(tile);
-    if (desired === "flag") decorateFlag(tile);
-    else if (desired === "block") decorateBlock(tile);
+    if (blocked) decorateBlock(tile);
+    else if (band) decorateFlag(tile, band);
 
     tile.setAttribute?.(APPLIED_ATTR, desired);
   }
 }
 
 // Restores root's subtree exactly to its pre-filter state: every injected ait- node,
-// the positioning helper class, the hidden class, the marker attribute, and the
-// injected <style> tag are all removed.
+// the positioning helper class, the hidden class, and the
+// marker attribute are all removed.
 export function clearFilter(root = document) {
   const marked = Array.from(root.querySelectorAll?.(`[${APPLIED_ATTR}]`) ?? []);
   for (const tile of marked) {
@@ -154,9 +114,5 @@ export function clearFilter(root = document) {
   }
   for (const el of root.querySelectorAll?.(`[${APPLIED_ATTR}]`) ?? []) {
     el.removeAttribute?.(APPLIED_ATTR);
-  }
-
-  if (typeof document !== "undefined") {
-    document.getElementById?.(STYLE_ID)?.remove();
   }
 }

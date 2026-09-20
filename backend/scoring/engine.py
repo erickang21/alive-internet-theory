@@ -5,6 +5,7 @@ from typing import Any, ParamSpec
 
 from backend import ytdlp
 from backend.scoring import channel_history, elevenlabs, fact_check, fillers, gptzero, youtube
+from backend.transcripts import Cue
 
 logger = logging.getLogger(__name__)
 
@@ -70,9 +71,10 @@ def evaluate_video(
     channel_id: str | None,
     video_length_seconds: int,
     audio_path: Path | None,
+    cues: list[Cue] | None = None,
 ) -> dict[str, Any]:
     breakdown = [
-        _run("gptzero_transcript", gptzero.score_transcript, transcript),
+        _run("gptzero_transcript", gptzero.score_transcript, transcript, cues),
         _run("elevenlabs_voice", elevenlabs.score_audio, audio_path),
         _run("filler_words", fillers.score_transcript, transcript, track_kind),
     ]

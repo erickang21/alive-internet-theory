@@ -1,12 +1,22 @@
 import { API_BASE_URL, MESSAGE_TYPES } from "../shared/constants.js";
+import { setIndexing } from "./indicator.js";
+import { getScores } from "./scores.js";
+
+const HANDLERS = {
+  [MESSAGE_TYPES.REQUEST_EVALUATION]: (message) => requestEvaluation(message.videoId),
+  [MESSAGE_TYPES.SUBMIT_VOTE]: submitVote,
+  [MESSAGE_TYPES.GET_EVALUATIONS]: getScores,
+  [MESSAGE_TYPES.RERUN_EVALUATION]: (message) => requestEvaluation(message.videoId, true),
+};
 
 // The service worker owns backend calls: its host_permissions exempt it from
 // the CORS and private-network checks a youtube.com content script would hit
 // calling 127.0.0.1.
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message?.type !== MESSAGE_TYPES.REQUEST_EVALUATION) return false;
+  const handler = HANDLERS[message?.type];
+  if (!handler) return false;
 
-  requestEvaluation(message.videoId)
+  handler(message)
     .then((result) => sendResponse({ ok: true, result }))
     .catch((error) => sendResponse({ ok: false, error: String(error) }));
   return true;
@@ -14,14 +24,31 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
 // Returns the stored evaluation. For a video that isn't stored yet, the backend
 // quietly starts indexing it and answers {status: "indexing"} or
-// {status: "failed", detail}.
-async function requestEvaluation(videoId) {
+// {status: "failed", detail}. `force` re-runs the analysis of a stored video
+// (debug mode), which answers {status: "indexing"} until the new result lands.
+async function requestEvaluation(videoId, force = false) {
   const response = await fetch(`${API_BASE_URL}/video/evaluation`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ video_id: videoId }),
+    body: JSON.stringify({ video_id: videoId, force }),
   });
   if (!response.ok && response.status !== 202) {
+    throw new Error(`Backend returned ${response.status}`);
+  }
+  const result = await response.json();
+  // Drives the toolbar spinner: the viewer's only sign that a video is being analyzed.
+  setIndexing(videoId, result.status === "indexing");
+  return result;
+}
+
+// One vote per (video_id, voter_id), so re-voting overwrites; returns the new tally.
+async function submitVote({ videoId, voterId, vote }) {
+  const response = await fetch(`${API_BASE_URL}/video/community-vote`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ video_id: videoId, voter_id: voterId, vote }),
+  });
+  if (!response.ok) {
     throw new Error(`Backend returned ${response.status}`);
   }
   return response.json();

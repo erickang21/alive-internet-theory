@@ -200,11 +200,57 @@ describe("threshold direction", () => {
     });
   });
 
-  test("score above threshold is NOT flagged", () => {
+  test("score above threshold gets a label but no inline flag", () => {
     withFakeDom((doc) => {
-      const { tile } = makeTile(doc);
+      const { tile, thumb } = makeTile(doc);
       applyFilter("flag", [{ tile, videoId: "high", score: 90 }]);
-      assert.equal(tile.querySelectorAll(".ait-flag-badge, .ait-flag-inline").length, 0);
+      assert.equal(thumb.querySelectorAll(".ait-flag-badge").length, 1);
+      assert.equal(tile.querySelectorAll(".ait-flag-inline").length, 0);
+    });
+  });
+
+  test("each score band gets its own preview label", () => {
+    const expected = [
+      [10, "AI"],
+      [44.9, "AI"],
+      [45, "Likely AI"],
+      [74.9, "Likely AI"],
+      [75, "Likely Human"],
+      [89.9, "Likely Human"],
+      [90, "Human"],
+      [100, "Human"],
+    ];
+    for (const [score, label] of expected) {
+      withFakeDom((doc) => {
+        const { tile, thumb } = makeTile(doc);
+        applyFilter("flag", [{ tile, videoId: "v", score }]);
+        assert.equal(thumb.querySelectorAll(".ait-flag-badge")[0].textContent, label, `${score}`);
+      });
+    }
+  });
+
+  test("block hides only the AI band and still labels the rest", () => {
+    withFakeDom((doc) => {
+      const ai = makeTile(doc);
+      const likelyAi = makeTile(doc);
+      applyFilter("block", [
+        { tile: ai.tile, videoId: "a", score: 10 },
+        { tile: likelyAi.tile, videoId: "b", score: 60 },
+      ]);
+      assert.ok(ai.tile.classList.contains("ait-filtered-hidden"));
+      assert.ok(!likelyAi.tile.classList.contains("ait-filtered-hidden"));
+      assert.equal(likelyAi.thumb.querySelectorAll(".ait-flag-badge")[0].textContent, "Likely AI");
+    });
+  });
+
+  test("a rescore into another band replaces the label", () => {
+    withFakeDom((doc) => {
+      const { tile, thumb } = makeTile(doc);
+      applyFilter("flag", [{ tile, videoId: "v", score: 60 }]);
+      applyFilter("flag", [{ tile, videoId: "v", score: 95 }]);
+      const badges = thumb.querySelectorAll(".ait-flag-badge");
+      assert.equal(badges.length, 1);
+      assert.equal(badges[0].textContent, "Human");
     });
   });
 });
@@ -246,7 +292,7 @@ describe("idempotency", () => {
 
       assert.equal(afterOne, 2); // one badge + one inline icon
       assert.equal(afterThree, afterOne);
-      assert.equal(tile.getAttribute("data-ait-filter-applied"), "flag");
+      assert.equal(tile.getAttribute("data-ait-filter-applied"), "flag:ai");
     });
   });
 
@@ -309,7 +355,6 @@ describe("clearFilter", () => {
       // Sanity: decoration is actually present before clearing.
       assert.ok(doc.body.querySelectorAll(".ait-flag-badge, .ait-flag-inline").length > 0);
       assert.ok(doc.body.querySelectorAll(".ait-filtered-hidden").length > 0);
-      assert.ok(doc.getElementById("ait-filter-style"));
 
       clearFilter();
 
@@ -317,7 +362,6 @@ describe("clearFilter", () => {
       assert.equal(doc.body.querySelectorAll(".ait-filtered-hidden").length, 0);
       assert.equal(doc.body.querySelectorAll(".ait-thumb-positioned").length, 0);
       assert.equal(doc.body.querySelectorAll("[data-ait-filter-applied]").length, 0);
-      assert.equal(doc.getElementById("ait-filter-style"), null);
     });
   });
 

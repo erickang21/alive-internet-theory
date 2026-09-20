@@ -1,17 +1,17 @@
 # Alive Internet Theory — Developer Reference (CLAUDE.md)
 
-Chrome extension that overlays on a YouTube video/Short and rates it **Likely human / Likely AI / AI Slop**, based on automated scoring factors.
+Chrome extension that embeds a verdict card in YouTube's watch page (floating on Shorts) and rates the video **Likely human / Likely AI / AI Slop**, based on automated scoring factors.
 
 ## Architecture: analysis runs in the backend, the extension only reads
 
 **A video is analyzed in the background the first time someone opens it**, or when a dev runs the analyze script. The extension itself fetches no transcripts and runs no scoring, and it never shows that indexing is happening.
 
 1. The analysis pipeline (`backend/analyze.py`) uses **yt-dlp for all YouTube data** (metadata, thumbnail, captions, the audio track when Whisper needs it, channel uploads). It transcribes locally with Whisper when captions are missing, scores the video, and writes the evaluation to SQLite. Devs run it directly (`python -m backend.analyze <targets>`) for batches, channels/playlists, and `--force` re-analysis.
-2. The extension asks the API for the current video with `POST /video/evaluation`. A stored evaluation comes back with one criterion scored at read time (channel history, see below) and the score and verdict recomputed from the full breakdown; otherwise the API quietly starts the same pipeline in a background thread (`backend/api/indexing.py`) and answers `202 {"status": "indexing"}`. Failures come back as `{"status": "failed", "detail": …}` and are held in memory only, so a backend restart clears them for another attempt. There are no automatic retries; a GPTZero failure degrades that one criterion like any other. `GET /video/evaluation?video_id=…` still serves stored rows without triggering anything; the other write is `POST /video/community-vote`.
-3. The extension shows the verdict if there is one, and otherwise "Not analyzed". While a video has no evaluation (indexing, a failed analysis, or an unreachable backend) the content script repeats the request every 30s ± 2s of jitter and stops as soon as a score is on screen, so a verdict that finishes indexing appears without reopening the video. Polling lives in `frontend/src/content/index.js`, not the service worker, because MV3 unloads an idle worker after ~30s. A stored evaluation is fetched once per visit.
+2. The extension asks the API for the current video with `POST /video/evaluation`. A stored evaluation comes back with one criterion scored at read time (channel history, see below) and the score and verdict recomputed from the full breakdown; otherwise the API quietly starts the same pipeline in a background thread (`backend/api/indexing.py`) and answers `202 {"status": "indexing"}`. Failures come back as `{"status": "failed", "detail": …}` and are held in memory only, so a backend restart clears them for another attempt. There are no automatic retries; a GPTZero failure degrades that one criterion like any other. `POST /video/evaluation` with `"force": true` re-runs the analysis of a stored video (`indexing.request(video_id, force=True)`; a job that is already running is never doubled), and while that rerun is pending the API answers `{"status": "indexing"}` instead of the old row. `GET /video/evaluation?video_id=…` still serves stored rows without triggering anything; the other write is `POST /video/community-vote`.
+3. The extension shows the verdict if there is one, and otherwise injects nothing. While a video has no evaluation (indexing, a failed analysis, or an unreachable backend) the content script repeats the request every 5–7s (5s plus up to 2s of jitter) and stops as soon as a score is on screen — the original 30s interval made a verdict that landed in seconds sit invisible until the next tick, so a verdict that finishes indexing appears without reopening the video. Polling lives in `frontend/src/content/index.js`, not the service worker, because MV3 unloads an idle worker after ~30s. A stored evaluation is fetched once per visit.
 
 ```
-frontend/                  Chrome extension (overlay, top-right of YT watch/shorts pages; shows results, silently queues unanalyzed videos)
+frontend/                  Chrome extension (verdict card in the watch page, breakdown/settings popover, feed filter; silently queues unanalyzed videos)
 backend/analyze.py         CLI: resolve targets → download → transcript → score → store
 backend/ytdlp.py           All YouTube access (target expansion, downloads, channel uploads + 24h cache)
 backend/transcripts.py     Caption parsing (json3/vtt), faster-whisper fallback
@@ -21,6 +21,20 @@ backend/database/          SQLAlchemy models + repositories on SQLite, Alembic m
 ```
 
 Storage: SQLite at `SQLITE_PATH` (default `backend/data/alive_internet_theory.db`), downloaded files at `MEDIA_DIR/<video_id>/` (`video.info.json` with everything yt-dlp extracted, `thumbnail.jpg`, `subtitles.<lang>.<ext>`, and `audio.<ext>` only when Whisper was needed — the voice check downloads its own 60-second excerpt and deletes it again, so it leaves nothing behind). **Only the first 5 minutes of a video are analyzed** (`ANALYZED_SECONDS` in `backend/ytdlp.py`): captions are cut to that window and the audio is cut to it. **The video itself isn't downloaded**, because no criterion uses it; add a video download back when a video-based criterion needs one. In Docker both live on the `/data` volume, along with the Whisper model cache (`HF_HOME`). The schema changes through Alembic migrations, which the app and the analyze script apply on startup (see README → Changing the database schema).
+
+## Frontend UI (`frontend/src/`)
+
+React 18 + styled-components, bundled by esbuild (`jsx: "automatic"`, minified, `NODE_ENV` defined). Both verified to run inside YouTube's Trusted Types page without a policy. Only the tile decoration still ships as a stylesheet (`dist/filter.css`); everything else is styled-components.
+
+- **`ui/tokens.js`**: the `--ait-*` custom properties on `[data-ait-root]`, as a `createGlobalStyle`. They stay CSS variables rather than a styled-components theme object so they can alias YouTube's live `--yt-sys-color-baseline--*` values (the old `--yt-spec-*` family is gone) and flip with `html[dark]` without any JS. Radii follow YouTube: 12px containers, 8px tabs/chips/marks, 4px thumbnail badges.
+- **`ui/Card.jsx`**: the verdict card — label, score as a percentage, 5-segment meter, community sentence, feedback thumbs, "View breakdown". It owns the vote state and portals the panel into `document.body`, so both feedback rows share one vote without a store. `ui/Ring.jsx` is the rainbow ring that draws once when a verdict lands while the viewer is watching.
+- **`ui/Panel.jsx`**: the popover under the masthead (YouTube menu surface, no scrim) with Breakdown and Settings tabs and the feedback row as a footer. Close X, click outside, and Escape close it; Tab is trapped inside; the card restores focus to its link. `ui/Breakdown.jsx` holds the per-criterion config and the accordion; `ui/Settings.jsx` the switches.
+- **`ui/hooks.js`**: `useVote` (tally, selection, submit, the memoized anonymous `voterId`, and the per-video `vote:<id>` key), `useFilterState`, `useDebugMode`, `useDismiss`.
+- **`content/mount.js`**: the one imperative piece left. It keeps a `[data-ait-mount]` container (`display: contents`, so the card itself is the flow element) anchored above `#donation-shelf`/`#related` using the anchor's own parent, since YouTube moves both into `#below` in single-column layouts, and re-anchors from a rAF-coalesced `MutationObserver`. Shorts have no side column, so the card floats top-right there.
+- **`content/index.jsx`**: polling and mounting. **Nothing is injected until the video has a verdict** — an unanalyzed video (or an unreachable backend) leaves the page untouched while the content script repeats the request every 5–7s.
+- **Feed filter** (`content/filter.js`, `videoScanner.js`, `filterRenderer.js`, `shared/filterState.js`, `background/scores.js`): stays imperative, because it decorates YouTube's own tiles rather than rendering our own tree. `chrome.storage.local["aitFilterState"]` is the source of truth, so the filter applies on load, on navigation and on storage changes with no UI open. With flags on, every analyzed tile gets a label for its score band: **AI** (below 45), **Likely AI** (45–75), **Likely Human** (75–90), **Human** (90+). "Remove" hides only the AI band (`AI_FILTER_THRESHOLD`). An unanalyzed tile (`null` score) always renders normally. Scores come from `GET /video/evaluation` (never POST: browsing a feed must not queue its tiles for indexing), fanned out 4 at a time with a cache where only misses expire.
+- **Toolbar** (`manifest.action`, `background/indicator.js`): `popup.html` renders `<Settings>` on its own React root, which is the only way to reach the settings off a watch page. The icon is a ring drawn into an `OffscreenCanvas` and pushed with `chrome.action.setIcon`, in three states: grey when idle, a spinning amber arc while any video answers `{status: "indexing"}`, and green for `DONE_MS` after one finishes. `requestEvaluation` sets the flag per video; entries expire after `STALE_MS` so a tab closed mid-analysis can't spin forever, and the module redraws the idle ring on load in case a worker died mid-spin. `icons/` holds the grey resting icon as `default_icon`.
+- All backend calls go through the service worker (`background/index.js`, one listener with a `HANDLERS` map). `npm test` runs the filter's unit tests (`node --test`).
 
 ## Scoring criteria → data source mapping
 
@@ -82,7 +96,7 @@ Scoring guidance: deduct from `class_probabilities.ai` / `mixed` weighted by `co
 - **Short text = low confidence.** Under ~200 words, report "not enough signal" instead of a number (relevant for Shorts with tiny transcripts).
 - Formatting is deliberately ignored by the model — don't build tricks around whitespace.
 - **Rate limit: 30,000 req/hour** (AI detection).
-- A flag should open a conversation — show evidence (per-criterion breakdown in the overlay), don't auto-punish. Our pass/fail detail view aligns with this.
+- A flag should open a conversation — show evidence (per-criterion breakdown in the popover), don't auto-punish. Our pass/fail detail view aligns with this.
 - GPTZero's Cloudflare rejects the default python-requests User-Agent (error 1010), so `backend/scoring/gptzero.py` sends a browser-style one.
 
 ### AI patterns (optional enrichment for the detail view)
@@ -93,7 +107,7 @@ Scoring guidance: deduct from `class_probabilities.ai` / `mixed` weighted by `co
   "patterns": [{ "pattern_id": "negative_parallelisms", "display_name": "Not just X, but Y",
                  "category": "Phrasing & style", "explanation": "…", "relevance": 5, "k_times": 1.6 }] }
 ```
-Pattern list grows per release — **don't hardcode it**. Could power "which phrases look AI" highlights in the overlay's details section.
+Pattern list grows per release — **don't hardcode it**. Could power "which phrases look AI" highlights in the breakdown's "Likely AI phrases" section (see Frontend UI).
 
 ---
 
@@ -127,7 +141,7 @@ All three are null when the check couldn't run. **Without usable Anthropic crede
 
 Two calls: (1) classification with a JSON-schema `output_config.format`; (2) for educational videos only, verification with the server-side `web_search_20260209` tool (max 5 searches). The verdict comes back through a `strict` `report_verdict` tool, because JSON output formats don't mix reliably with web-search citations. The verify loop resumes `pause_turn` up to 5 times. Both calls set `fallbacks="default"` (beta `server-side-fallback-2026-07-01`) so a safety decline re-runs on Anthropic's recommended fallback model; a final `refusal` fails the criterion.
 
-**Not scored yet:** the entry has `applied: false, deduction: 0`, so it shows as "n/a" with its detail text in the overlay. Choosing a deduction is an open decision.
+**Not scored yet:** the entry has `applied: false, deduction: 0`, so the breakdown shows it as "n/a" with its detail text. Choosing a deduction is an open decision.
 
 Rejected alternative: GPTZero `/v2/bibliography-scan/text`. It expects documents with a works-cited section (which transcripts don't have) and is limited to 10 req/minute.
 
