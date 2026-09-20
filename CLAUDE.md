@@ -26,7 +26,7 @@ Storage: SQLite at `SQLITE_PATH` (default `backend/data/alive_internet_theory.db
 
 | Criterion | Deduction | Data source |
 |---|---|---|
-| GPTZero transcript scan | up to −45 | GPTZero `/v2/predict/text` (see below) |
+| GPTZero transcript scan | up to −50 | GPTZero `/v2/predict/text` (see below) |
 | ElevenLabs voice scan (`elevenlabs_voice`) | up to −40 | ElevenLabs AI speech classifier over the audio (see below) |
 | Fact check (`fact_check`) | **not scored yet** (TBD) | Claude Opus 5 + web search over the transcript (see Fact check section) |
 | Stutters / filler words (absence ⇒ AI) | up to −20 | Transcript text analysis, ASR tracks only (see Filler-word section) |
@@ -50,7 +50,7 @@ A bonus is stored as a negative `deduction`, like the filler-word criterion's na
 - **Auth:** header `x-api-key: YOUR_KEY` (key granted via hackathon form; store as env var, never commit)
 - **Docs:** gptzero.stoplight.io
 
-### AI detection — used for the "up to −45" criterion
+### AI detection — used for the "up to −50" criterion
 
 `POST /v2/predict/text` — `Content-Type: application/json`, body: `{ "document": "<transcript text>" }`
 (`POST /v2/predict/files` also exists: up to 50 files multipart, PDF/DOCX/TXT — not needed for transcripts.)
