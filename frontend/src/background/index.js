@@ -42,44 +42,30 @@ async function storedEvaluation(videoId) {
 
 // --- GET_FACT_CHECK: the progressive fact-check bridge ------------------------------
 //
-// GET /video/fact-check?video_id= only ever returns the stored ValidityReport
-// (200) or 404 (backend/api/routes.py::_fact_check_report reads nothing but
-// evidence.report). That 404 is ambiguous by itself: it's the same response
-// whether the video hasn't been analyzed at all yet, the analysis finished but
-// the pre-gate ruled it ineligible (backend/scoring/fact_check.py's
-// _pregate_skipped_entry never writes a report), or the fact-check criterion
-// was skipped for some other reason (e.g. no usable LLM credentials). Only a
-// report existing is unambiguous, so a 404 there falls back to the already
-// read-only, side-effect-free GET /video/evaluation to look for
-// evidence.pregate on the fact_check breakdown entry - present (with
-// isEligible false) only on the pre-gate skip path per that module.
-async function fetchFactCheckReport(videoId) {
+// GET /video/fact-check?video_id= discriminates the states itself: 404 means
+// no evaluation row at all (still indexing, so keep polling); a 200 carries
+// either the bare ValidityReport dict (no top-level "status" key, so the
+// shapes can't collide), {status: "skipped", pregate} for a video the
+// pre-gate genuinely classified as not fact-checkable, or
+// {status: "unavailable", detail} when the check couldn't run (no LLM
+// credentials, classifier down, a failed check). "unavailable" maps to the
+// bridge's terminal "failed" stage rather than "fact_checking": the state is
+// remembered in the row until a --force rerun, so polling it again cannot
+// change the answer.
+async function getFactCheckStatus(videoId) {
   const url = `${API_BASE_URL}/video/fact-check?video_id=${encodeURIComponent(videoId)}`;
   const response = await fetch(url);
-  if (response.status === 404) return null;
+  if (response.status === 404) return { stage: "fact_checking" };
   if (!response.ok) throw new Error(`Backend returned ${response.status}`);
-  return response.json();
-}
 
-function pregateFromEvaluation(evaluation) {
-  const entry = (evaluation?.breakdown ?? []).find((item) => item?.criterion === "fact_check");
-  return entry?.evidence?.pregate ?? null;
-}
-
-async function getFactCheckStatus(videoId) {
-  const report = await fetchFactCheckReport(videoId);
-  if (report) return { stage: "complete", report };
-
-  const evaluation = await storedEvaluation(videoId);
-  const pregate = evaluation ? pregateFromEvaluation(evaluation) : null;
-  if (pregate && pregate.isEligible === false) {
-    return { stage: "skipped_fiction", pregate };
+  const body = await response.json();
+  if (body?.status === "skipped") {
+    return { stage: "skipped_fiction", pregate: body.pregate ?? null };
   }
-  // Either not analyzed yet, or analyzed but the fact-check criterion has
-  // nothing to show for a reason other than the pre-gate (e.g. no usable
-  // LLM credentials) - the frozen FACT_CHECK_STAGES contract has no separate
-  // "permanently skipped" stage, so both read as "still working".
-  return { stage: "fact_checking" };
+  if (body?.status === "unavailable") {
+    return { stage: "failed", detail: body.detail ?? null };
+  }
+  return { stage: "complete", report: body };
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {

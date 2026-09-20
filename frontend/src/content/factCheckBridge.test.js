@@ -187,6 +187,24 @@ test("no stored report and no pregate skip maps to fact_checking", () => {
   assert.equal(patch.result, null);
 });
 
+test("an unavailable check maps to failed with the backend's own wording", () => {
+  const patch = stagePatchFromResponse({
+    ok: true,
+    stage: "failed",
+    detail: "Skipped: no usable fact-check LLM credentials.",
+  });
+  assert.equal(patch.stage, "failed");
+  assert.equal(patch.error.message, "Skipped: no usable fact-check LLM credentials.");
+  assert.equal(patch.error.retryable, true);
+  assert.equal(patch.pregate, null);
+});
+
+test("an unavailable check with no detail still gets an honest message", () => {
+  const patch = stagePatchFromResponse({ ok: true, stage: "failed", detail: null });
+  assert.equal(patch.stage, "failed");
+  assert.ok(patch.error.message.length > 0);
+});
+
 // --- the bridge: end-to-end polling behaviour ---------------------------------------
 
 test("still-checking keeps polling on the interval and writes fact_checking each time", async () => {
@@ -221,7 +239,11 @@ test("a report arriving stops polling at complete", async () => {
   sendMessageImpl = async () => {
     calls += 1;
     if (calls === 1) return { ok: true, stage: "fact_checking" };
-    return { ok: true, stage: "complete", report: { validity_score: 80, rating: "OK", verdicts: [] } };
+    return {
+      ok: true,
+      stage: "complete",
+      report: { validity_score: 80, rating: "OK", verdicts: [] },
+    };
   };
 
   const bridge = createFactCheckBridge(FAST);
@@ -245,7 +267,12 @@ test("a report arriving stops polling at complete", async () => {
 test("a pregate skip stops polling at skipped_fiction", async () => {
   mock.timers.enable({ apis: ["setTimeout"] });
   let calls = 0;
-  const pregate = { isEligible: false, category: "gaming", reason: "Not factual.", source: "category" };
+  const pregate = {
+    isEligible: false,
+    category: "gaming",
+    reason: "Not factual.",
+    source: "category",
+  };
   sendMessageImpl = async () => {
     calls += 1;
     return { ok: true, stage: "skipped_fiction", pregate };
@@ -263,6 +290,28 @@ test("a pregate skip stops polling at skipped_fiction", async () => {
   await advance(1000);
   await advance(1000);
   assert.equal(calls, 1, "polling must stop once skipped_fiction is reached");
+});
+
+test("an unavailable check stops polling at failed instead of spinning forever", async () => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  let calls = 0;
+  sendMessageImpl = async () => {
+    calls += 1;
+    return { ok: true, stage: "failed", detail: "Skipped: no usable fact-check LLM credentials." };
+  };
+
+  const bridge = createFactCheckBridge(FAST);
+  bridge.start("v1");
+  await flushMicrotasks();
+
+  const record = await getFactCheckState("v1");
+  assert.equal(record.stage, "failed");
+  assert.equal(record.error.message, "Skipped: no usable fact-check LLM credentials.");
+  validateRecord(record);
+
+  await advance(1000);
+  await advance(1000);
+  assert.equal(calls, 1, "polling must stop once the backend says the check cannot run");
 });
 
 test("a run of backend errors writes failed/retryable and stops polling", async () => {
@@ -329,7 +378,11 @@ test("retry() re-arms polling after failed without waiting out the interval", as
   sendMessageImpl = async () => {
     calls += 1;
     if (failing) throw new Error("down");
-    return { ok: true, stage: "complete", report: { validity_score: 90, rating: "Good", verdicts: [] } };
+    return {
+      ok: true,
+      stage: "complete",
+      report: { validity_score: 90, rating: "Good", verdicts: [] },
+    };
   };
 
   const bridge = createFactCheckBridge(FAST);

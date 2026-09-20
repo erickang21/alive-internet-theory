@@ -17,8 +17,9 @@
 import assert from "node:assert/strict";
 import test, { mock } from "node:test";
 
-import { MESSAGE_TYPES } from "../shared/constants.js";
+import { FILTER_STORAGE_KEY, MESSAGE_TYPES } from "../shared/constants.js";
 import { _resetMemoryStore } from "../shared/factCheckState.js";
+import { putCachedScore } from "../shared/scoreCache.js";
 // factCheckMount.js is a singleton module (imported by index.js under a
 // stable specifier, unlike index.js itself below, which each test re-imports
 // under a cache-busting query string) - its mounted-video/bridge/subscription
@@ -177,6 +178,12 @@ function parseFragment(html) {
 function matches(node, selector) {
   if (selector.startsWith(".")) return node.classList.contains(selector.slice(1));
   if (selector.startsWith("#")) return node.id === selector.slice(1);
+  const attrSelector = selector.match(/^([a-zA-Z0-9-]+)\[([a-zA-Z-]+)\]$/);
+  if (attrSelector) {
+    return (
+      node.tagName.toLowerCase() === attrSelector[1] && node.getAttribute(attrSelector[2]) !== null
+    );
+  }
   return node.tagName.toLowerCase() === selector.toLowerCase();
 }
 
@@ -397,6 +404,48 @@ test("leaving the watch page stops the fact-check bridge too", async () => {
     await flushMicrotasks();
 
     assert.equal(factCheckCalls, 1, "no more fact-check polling once the video overlay is gone");
+  } finally {
+    teardownGlobals();
+  }
+});
+
+test("cached tile flags survive a refresh pass when the worker is unreachable", async () => {
+  installFakeDom();
+  installLocation("https://www.youtube.com/"); // a feed page: no watch-page overlay traffic
+
+  // One grid tile whose video has a persisted AI-slop score from an earlier
+  // session — the exact situation the persistent cache exists for.
+  const tile = new FakeElement("ytd-rich-item-renderer");
+  const anchor = new FakeElement("a");
+  anchor.setAttribute("href", "/watch?v=vidCached");
+  const thumb = new FakeElement("img");
+  tile.appendChild(anchor);
+  tile.appendChild(thumb);
+  globalThis.document.querySelectorAll = () => [tile];
+
+  installChrome({
+    onSendMessage: (message) => {
+      if (message.type === MESSAGE_TYPES.GET_EVALUATIONS) {
+        // The worker is unreachable (extension reloading): the fresh pass
+        // gets nothing, and must not undo what the cached pass drew.
+        return { ok: false, error: "worker restarting" };
+      }
+      throw new Error(`unexpected message type: ${message.type}`);
+    },
+  });
+  store[FILTER_STORAGE_KEY] = "flag"; // set directly: no listeners exist yet to re-fire
+  await putCachedScore("vidCached", { score: 30, verdict: "ai_slop" });
+
+  try {
+    await import(`./index.js?case=cached-flags-survive-worker-outage`);
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    assert.equal(
+      tile.getAttribute("data-ait-filter-applied"),
+      "flag",
+      "the fresh (empty) pass must merge over the cached pass, not replace it",
+    );
   } finally {
     teardownGlobals();
   }

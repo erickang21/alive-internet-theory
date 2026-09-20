@@ -92,11 +92,23 @@ export function stagePatchFromResponse(response) {
   if (response?.stage === "skipped_fiction") {
     return { stage: "skipped_fiction", pregate: response.pregate ?? null };
   }
-  // "fact_checking" - no evaluation yet, or one exists but the criterion
-  // hasn't produced a report and wasn't pre-gate-skipped either (e.g. no
-  // usable fact-check LLM credentials). There's no stage in the frozen
-  // FACT_CHECK_STAGES contract for "permanently skipped, nothing to poll
-  // for", so this keeps polling rather than mislabelling it complete/failed.
+  // "failed" here is the backend's {status: "unavailable"}: the check
+  // couldn't run (no LLM credentials, classifier down) and the row remembers
+  // that until a --force rerun, so polling again cannot change the answer.
+  // Terminal like a fetch-failure "failed", but with the backend's own
+  // wording - the fact-check couldn't run; the video didn't fail.
+  if (response?.stage === "failed") {
+    return {
+      stage: "failed",
+      error: {
+        message: response.detail || "The fact check couldn't run for this video.",
+        retryable: true,
+      },
+      pregate: null,
+    };
+  }
+  // "fact_checking" - no evaluation row yet, so the analysis (and with it the
+  // fact check) is still on its way.
   return { stage: "fact_checking", pregate: null, result: null };
 }
 
@@ -144,10 +156,13 @@ export function createFactCheckBridge({
 
   function scheduleNext(forVideoId) {
     clearTimer();
-    timer = setTimeout(() => {
-      timer = null;
-      void tick(forVideoId);
-    }, jitteredDelay(intervalMs, jitterMs));
+    timer = setTimeout(
+      () => {
+        timer = null;
+        void tick(forVideoId);
+      },
+      jitteredDelay(intervalMs, jitterMs),
+    );
   }
 
   async function fetchStatus(forVideoId) {

@@ -122,15 +122,19 @@ async function rescanAndApplyFilter(tiles) {
 
   // Then refresh: the background may know about a video newly analyzed since it
   // was last cached, or a real score that supersedes a cached "not analyzed" miss.
+  // Merged over the cached pass, because scoresForVideoIds returns {} when the
+  // worker is unreachable - exactly the case the persistent cache exists for -
+  // and applying that bare would strip every flag the first pass just drew.
   const freshScores = await scoresForVideoIds(uniqueIds);
+  const mergedScores = { ...cachedScores, ...freshScores };
 
   lastFilterStats = {
     total: uniqueIds.length,
-    analyzed: uniqueIds.filter((id) => freshScores[id] !== null && freshScores[id] !== undefined)
+    analyzed: uniqueIds.filter((id) => mergedScores[id] !== null && mergedScores[id] !== undefined)
       .length,
   };
 
-  applyScoresToTiles(state, idByTile, freshScores);
+  applyScoresToTiles(state, idByTile, mergedScores);
 }
 
 // Re-apply whenever the stored filter state changes (panel elsewhere, another tab, or
