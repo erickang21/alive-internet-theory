@@ -17,7 +17,7 @@ from typing import Any
 from backend import transcripts, ytdlp
 from backend.config import config
 from backend.database import EvaluationRepository, run_migrations
-from backend.scoring import evaluate_video
+from backend.scoring import elevenlabs, evaluate_video
 
 logger = logging.getLogger("backend.analyze")
 
@@ -30,13 +30,30 @@ def analyze_video(video_id: str) -> dict[str, Any] | None:
         return None
     info = download.info
 
-    evaluation = evaluate_video(
-        video_id=video_id,
-        transcript=transcript["text"],
-        track_kind=transcript["kind"],
-        channel_id=info.get("channel_id"),
-        video_length_seconds=int(info.get("duration") or 0),
-    )
+    # Only the Whisper fallback leaves audio on disk, so a captioned video needs its own
+    # download: just the minute the voice check listens to, deleted once it has scored.
+    audio_path: Path | None = transcript.get("audio_path")
+    temporary_audio = audio_path is None
+    if temporary_audio:
+        try:
+            audio_path = ytdlp.download_audio(video_id, elevenlabs.CLASSIFIED_SECONDS)
+        except Exception:
+            # One flaky audio fetch should cost us this criterion, not the whole video.
+            logger.exception("%s: couldn't download audio for the voice check", video_id)
+            audio_path = None
+
+    try:
+        evaluation = evaluate_video(
+            video_id=video_id,
+            transcript=transcript["text"],
+            track_kind=transcript["kind"],
+            channel_id=info.get("channel_id"),
+            video_length_seconds=int(info.get("duration") or 0),
+            audio_path=audio_path,
+        )
+    finally:
+        if temporary_audio and audio_path:
+            audio_path.unlink(missing_ok=True)
     timestamp = info.get("timestamp")
     evaluation["metadata"] = {
         "title": info.get("title"),

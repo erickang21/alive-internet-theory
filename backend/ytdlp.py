@@ -119,8 +119,8 @@ def _flatten_video_ids(info: dict[str, Any]) -> Iterator[str]:
 
 
 def fetch_video(video_id: str) -> Download:
-    """Metadata, captions, and thumbnail. Media is fetched separately by
-    download_audio, only when Whisper needs it."""
+    """Metadata, captions, and thumbnail. Audio is fetched separately by
+    download_audio, for Whisper or the voice check."""
     out_dir = Path(config.media_dir) / video_id
     params: _Params = {
         **QUIET,
@@ -185,8 +185,8 @@ def fetch_video(video_id: str) -> Download:
     )
 
 
-def download_audio(video_id: str) -> Path:
-    """The first ANALYZED_SECONDS of the audio track, for Whisper.
+def download_audio(video_id: str, seconds: int = ANALYZED_SECONDS) -> Path:
+    """The first `seconds` of the audio track, for Whisper or the voice check.
 
     Downloads the whole track and cuts it locally: a ranged download goes through
     ffmpeg, which YouTube throttles to about playback speed (0.1 MB/s measured,
@@ -199,16 +199,16 @@ def download_audio(video_id: str) -> Path:
         "outtmpl": str(out_dir / "audio.%(ext)s"),
         "progress_hooks": [_progress_logger()],
     }
-    logger.info("audio: downloading the audio track for Whisper")
+    logger.info("audio: downloading the audio track")
     started = time.monotonic()
     with YoutubeDL(params) as ydl:
         info = _as_dict(ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}"))
     path = Path(info["requested_downloads"][0]["filepath"])
-    if (info.get("duration") or 0) > ANALYZED_SECONDS:
-        _cut(path, ANALYZED_SECONDS)
+    if (info.get("duration") or 0) > seconds:
+        _cut(path, seconds)
     logger.info(
         "audio: first %s ready in %.0fs (%.1f MB)",
-        _clock(min(info.get("duration") or 0, ANALYZED_SECONDS)),
+        _clock(min(info.get("duration") or 0, seconds)),
         time.monotonic() - started,
         path.stat().st_size / 1e6,
     )

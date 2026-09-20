@@ -68,7 +68,7 @@ xargs docker compose exec -T backend python -m backend.analyze < videos.txt
 
 1. Downloads the captions, thumbnail, and yt-dlp's full metadata (`video.info.json`), but not the video itself. That takes a few seconds.
 2. Uses **the first 5 minutes** of the captions as the transcript. If there are no captions, or they're blank, it downloads the audio track, cuts it to the first 5 minutes, and transcribes it locally with Whisper (about 80s on a CPU). A video with no captions and no detectable speech is skipped and not stored.
-3. Scores it: GPTZero, filler words, upload cadence, channel age, plus Claude's fact check (educational videos only; recorded, not scored yet).
+3. Scores it: GPTZero, the ElevenLabs voice check, filler words, upload cadence, channel age, plus Claude's fact check (educational videos only; recorded, not scored yet). The voice check listens to the first minute of audio; if step 2 didn't already download audio, it fetches a 60-second excerpt and deletes it once scored.
 4. Saves the result and prints e.g. `jNQXAC9IVRw: likely_human (score 100.0)`.
 
 The script exits non-zero if any video failed, and logs why.
@@ -144,5 +144,6 @@ You can run `ant auth login` instead of putting an Anthropic key in `.env`. A ve
 | `service "backend" is not running` | `exec` needs the stack up. Run `docker compose up -d`, or use `docker compose run --rm backend …` instead. |
 | `WARNING … Skipping the fact check for this run: …` | No usable Anthropic key. Everything else still runs. Add a key to use the fact check. |
 | `ERROR … criterion gptzero_transcript failed` | `GPTZERO_API_KEY` is missing or invalid. That criterion is skipped; the rest still runs. |
+| `ERROR … criterion elevenlabs_voice failed` | The ElevenLabs classifier is an undocumented endpoint that needs no key, so this usually means it's down, throttling, or has changed. That criterion is skipped; the rest still runs. |
 | `… analysis failed` with a yt-dlp download error | Usually YouTube changed something. Rebuild with `--no-cache` to update yt-dlp. If YouTube asks you to confirm you're not a bot, make sure you're running from your own machine, not a server. Age-restricted and members-only videos can't be analyzed (they need a logged-in YouTube session). |
 | Extension changes don't show up | Run `npm run build` in `frontend/`, click reload on the extension card in `chrome://extensions`, then refresh the YouTube tab. |
