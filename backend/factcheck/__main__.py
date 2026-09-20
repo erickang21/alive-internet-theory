@@ -37,21 +37,44 @@ def _load_transcript(video_id: str, transcript_file: str | None) -> str | None:
     return transcript if transcript else None
 
 
-def _store(video_id: str, report: ValidityReport) -> None:
-    """Merge the report's fields into the video's stored evaluation, if any.
+def _store(video_id: str, report: ValidityReport) -> bool:
+    """Merge the report into the video's stored evaluation. False if there is none.
 
-    Mirrors the derivation in backend/scoring/fact_check.py so a report saved
-    from this CLI looks identical to one saved through the normal analyze
-    pipeline. If the video has no stored evaluation yet, this creates a bare
-    one holding only the fact-check fields -- `python -m backend.analyze`
-    fills in the rest (score, verdict, breakdown) on its own run.
+    Uses the same entry/column derivation as backend/scoring/fact_check.py, so
+    a report saved from this CLI looks identical to one saved through the
+    normal analyze pipeline -- including the breakdown `fact_check` entry that
+    `GET /video/fact-check` reads. A video with no stored evaluation is NOT
+    given a bare row: a row without score/verdict/breakdown 500s the
+    /video/evaluation routes and, worse, its existence stops the API from ever
+    queueing the video for indexing.
     """
-    from backend.scoring.fact_check import evidence_for_report
+    from backend.scoring.fact_check import CRITERION, entry_for_report, evidence_for_report
 
     repo = EvaluationRepository()
-    existing = repo.find_by_video_id(video_id) or {"video_id": video_id}
+    existing = repo.find_by_video_id(video_id)
+    if existing is None:
+        logger.error(
+            "%s: no stored evaluation to merge into. Run `python -m backend.analyze %s` "
+            "first, or use --no-store.",
+            video_id,
+            video_id,
+        )
+        return False
+
+    entry = entry_for_report(report)
+    breakdown = existing.get("breakdown") or []
+    replaced = False
+    for index, item in enumerate(breakdown):
+        if item.get("criterion") == CRITERION:
+            breakdown[index] = entry
+            replaced = True
+            break
+    if not replaced:
+        breakdown.append(entry)
+    existing["breakdown"] = breakdown
     existing.update(evidence_for_report(report))
     repo.upsert(existing)
+    return True
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -111,7 +134,8 @@ def main(argv: list[str] | None = None) -> int:
         print(output, end="")
 
     if not args.no_store:
-        _store(args.video_id, report)
+        if not _store(args.video_id, report):
+            return 2
         logger.info("%s: stored", args.video_id)
 
     return 0

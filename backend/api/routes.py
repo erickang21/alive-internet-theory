@@ -83,19 +83,38 @@ def get_fact_check():
     if evaluation is None:
         return jsonify({"error": "this video hasn't been analyzed"}), 404
 
-    report_dict = _fact_check_report(evaluation)
-    if report_dict is None:
-        return jsonify({"error": "no fact-check report is stored for this video"}), 404
+    # A row exists, so 404 is over: the analysis ran, and the answer is one of
+    # three states. A report serves as before (bare dict, so existing consumers
+    # keep working); a pre-gate skip and a check that couldn't run each get a
+    # discriminated 200 -- the report dict has no top-level "status" key, so the
+    # shapes can't collide. A fallback-sourced pre-gate is not a classification
+    # (the classifier was down or had no credentials), so it reads as
+    # "unavailable", never as a statement about the video's content.
+    entry = _fact_check_entry(evaluation)
+    evidence = (entry or {}).get("evidence") or {}
 
-    if fmt == "markdown":
-        return Response(to_markdown(report_from_dict(report_dict)), mimetype="text/markdown")
-    return jsonify(report_dict)
+    report_dict = evidence.get("report")
+    if report_dict is not None:
+        if fmt == "markdown":
+            return Response(to_markdown(report_from_dict(report_dict)), mimetype="text/markdown")
+        return jsonify(report_dict)
+
+    pregate = evidence.get("pregate")
+    if (
+        isinstance(pregate, dict)
+        and pregate.get("isEligible") is False
+        and pregate.get("source") != "fallback"
+    ):
+        return jsonify({"status": "skipped", "pregate": pregate})
+
+    detail = (entry or {}).get("detail") or "The fact check didn't run for this video."
+    return jsonify({"status": "unavailable", "detail": detail})
 
 
-def _fact_check_report(evaluation: dict) -> dict | None:
+def _fact_check_entry(evaluation: dict) -> dict | None:
     for item in evaluation.get("breakdown", []):
         if item.get("criterion") == "fact_check":
-            return (item.get("evidence") or {}).get("report")
+            return item
     return None
 
 

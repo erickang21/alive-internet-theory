@@ -415,6 +415,21 @@ def test_ambiguous_category_with_llm_unavailable_fails_closed(monkeypatch, _llm_
     assert result["evidence"]["pregate"]["category"] == "unknown"
 
 
+def test_fallback_gate_stores_no_content_verdict(monkeypatch, _llm_spy):
+    """A fail-closed fallback gate determined nothing about the video, so it
+    must not freeze `is_educational=False` (a content statement) into the row
+    the way a genuine classification does."""
+    _openai_credentials_present(monkeypatch)
+    _install_poison_engine(monkeypatch)
+
+    evidence = fact_check.score_transcript(
+        ELIGIBLE_TRANSCRIPT, title="Some video", description="desc", categories=["Entertainment"]
+    )["evidence"]
+
+    assert evidence["pregate"]["source"] == "fallback"
+    assert evidence["is_educational"] is None
+
+
 def test_pregate_dict_reaches_evidence_with_camelcase_keys(monkeypatch):
     _openai_credentials_present(monkeypatch)
     _install_poison_engine(monkeypatch)

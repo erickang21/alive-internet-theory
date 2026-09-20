@@ -3,6 +3,7 @@ anthropic>=1.7
 faster-whisper>=1.2
 flask>=3.0
 flask-cors>=4.0
+openai>=3
 python-dotenv>=1.0
 requests>=2.31
 sqlalchemy>=2.0

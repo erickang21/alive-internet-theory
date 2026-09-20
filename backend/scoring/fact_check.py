@@ -19,7 +19,7 @@ from typing import Any
 from backend.config import config
 from backend.factcheck.engine import FactCheckEngine
 from backend.factcheck.models import ClaimVerdict, ValidityReport
-from backend.factcheck.pregate import PreGateResult, pre_gate
+from backend.factcheck.pregate import SOURCE_FALLBACK, PreGateResult, pre_gate
 
 logger = logging.getLogger(__name__)
 
@@ -93,19 +93,24 @@ def _pregate_skipped_entry(gate: PreGateResult) -> dict[str, Any]:
     """The breakdown entry for a video the pre-gate ruled out before the engine ran.
 
     Legacy-field mapping for this path (distinct from `_skipped_entry`, which
-    means "we don't know anything"): the pre-gate DID look at the video and
-    concluded it isn't the kind of thing fact-checking applies to, so
-    `is_educational=False` is actual information, not a placeholder. `thesis`
-    and `hallucinated` stay None because no claim was ever extracted or
-    verified -- there is nothing to report a thesis or a truth value for.
+    means "we don't know anything"): when the pre-gate actually classified the
+    video, it concluded this isn't the kind of thing fact-checking applies to,
+    so `is_educational=False` is actual information, not a placeholder. The
+    fail-closed fallback gate (`SOURCE_FALLBACK`: the classifier was down or
+    had no credentials) determined nothing about the video, so there
+    `is_educational` stays None -- storing False would freeze an outage into
+    the row as a content verdict. `thesis` and `hallucinated` stay None because
+    no claim was ever extracted or verified -- there is nothing to report a
+    thesis or a truth value for.
     """
+    determined = gate.source != SOURCE_FALLBACK
     return {
         "criterion": CRITERION,
         "deduction": 0,
         "applied": False,
         "detail": f"Not fact-checked: {gate.reason}",
         "evidence": {
-            "is_educational": False,
+            "is_educational": False if determined else None,
             "thesis": None,
             "hallucinated": None,
             "validity_score": None,
@@ -162,6 +167,23 @@ def evidence_for_report(report: ValidityReport) -> dict[str, Any]:
     }
 
 
+def entry_for_report(report: ValidityReport) -> dict[str, Any]:
+    """The full breakdown entry for a completed report.
+
+    Shared by `score_transcript` (below) and `backend/factcheck/__main__.py`,
+    so a report stored from the standalone CLI is served by
+    `GET /video/fact-check` exactly like one stored through the analyze
+    pipeline (the route reads `evidence.report`).
+    """
+    return {
+        "criterion": CRITERION,
+        "deduction": 0,
+        "applied": False,
+        "detail": _detail(report),
+        "evidence": {**evidence_for_report(report), "report": report.to_dict()},
+    }
+
+
 def _detail(report: ValidityReport) -> str:
     if report.claim_count == 0:
         return "No checkable factual claims were extracted from this video."
@@ -208,12 +230,4 @@ def score_transcript(
         return _skipped_entry()
 
     report = FactCheckEngine().run(transcript)
-    legacy = evidence_for_report(report)
-
-    return {
-        "criterion": CRITERION,
-        "deduction": 0,
-        "applied": False,
-        "detail": _detail(report),
-        "evidence": {**legacy, "report": report.to_dict()},
-    }
+    return entry_for_report(report)
