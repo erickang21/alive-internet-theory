@@ -1,9 +1,10 @@
 import logging
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, ParamSpec
 
 from backend import ytdlp
-from backend.scoring import channel_history, fact_check, fillers, gptzero, youtube
+from backend.scoring import channel_history, elevenlabs, fact_check, fillers, gptzero, youtube
 
 logger = logging.getLogger(__name__)
 
@@ -68,9 +69,11 @@ def evaluate_video(
     track_kind: str | None,
     channel_id: str | None,
     video_length_seconds: int,
+    audio_path: Path | None,
 ) -> dict[str, Any]:
     breakdown = [
         _run("gptzero_transcript", gptzero.score_transcript, transcript),
+        _run("elevenlabs_voice", elevenlabs.score_audio, audio_path),
         _run("filler_words", fillers.score_transcript, transcript, track_kind),
     ]
     fact_check_result = _run("fact_check", fact_check.score_transcript, transcript)

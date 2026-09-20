@@ -22,13 +22,14 @@ backend/api/               Flask API: GET/POST /video/evaluation, GET /video/fac
 backend/database/          SQLAlchemy models + repositories on SQLite, Alembic migrations
 ```
 
-Storage: SQLite at `SQLITE_PATH` (default `backend/data/alive_internet_theory.db`), downloaded files at `MEDIA_DIR/<video_id>/` (`video.info.json` with everything yt-dlp extracted, `thumbnail.jpg`, `subtitles.<lang>.<ext>`, and `audio.<ext>` only when Whisper was needed). **Only the first 5 minutes of a video are analyzed** (`ANALYZED_SECONDS` in `backend/ytdlp.py`): captions are cut to that window and the audio is cut to it. **The video itself isn't downloaded**, because no criterion uses it; add a video download back when a video-based criterion needs one. In Docker both live on the `/data` volume, along with the Whisper model cache (`HF_HOME`). The schema changes through Alembic migrations, which the app and the analyze script apply on startup (see README → Changing the database schema).
+Storage: SQLite at `SQLITE_PATH` (default `backend/data/alive_internet_theory.db`), downloaded files at `MEDIA_DIR/<video_id>/` (`video.info.json` with everything yt-dlp extracted, `thumbnail.jpg`, `subtitles.<lang>.<ext>`, and `audio.<ext>` only when Whisper was needed — the voice check downloads its own 60-second excerpt and deletes it again, so it leaves nothing behind). **Only the first 5 minutes of a video are analyzed** (`ANALYZED_SECONDS` in `backend/ytdlp.py`): captions are cut to that window and the audio is cut to it. **The video itself isn't downloaded**, because no criterion uses it; add a video download back when a video-based criterion needs one. In Docker both live on the `/data` volume, along with the Whisper model cache (`HF_HOME`). The schema changes through Alembic migrations, which the app and the analyze script apply on startup (see README → Changing the database schema).
 
 ## Scoring criteria → data source mapping
 
 | Criterion | Deduction | Data source |
 |---|---|---|
-| GPTZero transcript scan | up to −45 | GPTZero `/v2/predict/text` (see below) |
+| GPTZero transcript scan | up to −50 | GPTZero `/v2/predict/text` (see below) |
+| ElevenLabs voice scan (`elevenlabs_voice`) | up to −40 | ElevenLabs AI speech classifier over the audio (see below) |
 | Fact check → Validity Score | **not scored yet** (TBD); reported as its own independent score | Claim extraction + Browserbase search/fetch + per-claim verification (see Fact check section) |
 | Stutters / filler words (absence ⇒ AI) | up to −20 | Transcript text analysis, ASR tracks only (see Filler-word section) |
 | Upload frequency + video length | up to −10 | Exact upload timestamps of the channel's latest 20 uploads via yt-dlp (see yt-dlp section) |
@@ -51,7 +52,7 @@ A bonus is stored as a negative `deduction`, like the filler-word criterion's na
 - **Auth:** header `x-api-key: YOUR_KEY` (key granted via hackathon form; store as env var, never commit)
 - **Docs:** gptzero.stoplight.io
 
-### AI detection — used for the "up to −45" criterion
+### AI detection — used for the "up to −50" criterion
 
 `POST /v2/predict/text` — `Content-Type: application/json`, body: `{ "document": "<transcript text>" }`
 (`POST /v2/predict/files` also exists: up to 50 files multipart, PDF/DOCX/TXT — not needed for transcripts.)
@@ -95,6 +96,24 @@ Scoring guidance: deduct from `class_probabilities.ai` / `mixed` weighted by `co
                  "category": "Phrasing & style", "explanation": "…", "relevance": 5, "k_times": 1.6 }] }
 ```
 Pattern list grows per release — **don't hardcode it**. Could power "which phrases look AI" highlights in the overlay's details section.
+
+---
+
+## ElevenLabs AI speech classifier (`backend/scoring/elevenlabs.py`) — the one audio criterion
+
+Every other criterion reads the transcript or the channel. This one listens to the audio, so it catches a synthesized narrator reading a human-written script.
+
+- **Endpoint:** `POST https://api.elevenlabs.io/v1/moderation/ai-speech-classification`, multipart field `file`. Response is `{"probability": <float>}`.
+- **No API key.** Unauthenticated requests succeed, and sending an *invalid* `xi-api-key` is a 401 — so send no key header at all. There is nothing to configure.
+- **Undocumented.** It is absent from ElevenLabs' public OpenAPI spec and has no API-reference page (the classifier is presented as a web tool). Nothing about it is contractual: it may change shape, start requiring auth, or rate-limit without notice. `engine._safe` degrades it to "unavailable" if it does.
+- **Only the first 60 seconds are classified**, which is measured, not assumed: 75s of silence ahead of speech returns exactly the silence value. So a video that opens on a long music intro is judged on the intro. `CLASSIFIED_SECONDS = 60` is why `download_audio` takes a cut length.
+- yt-dlp's raw webm/opus is accepted as-is — **no transcode**, and a 60s `ffmpeg -t 60 -c copy` cut reads identically to the full track while uploading ~6× less.
+
+**It deducts on a hit and never awards a bonus on a miss.** The classifier detects *only ElevenLabs* audio (99% precision / 80% recall, and not Eleven v3), so a high reading is strong evidence while a low one is almost none: an OpenAI or PlayHT voice measures 0.02, exactly like a real person. This is the deliberate difference from the filler-word criterion, which does pay a bonus.
+
+Measured calibration: human speech, silence, white/pink noise and a chord all land at 0.02–0.05; genuine ElevenLabs samples land at 0.98; values look clamped to `[0.02, 0.98]`. `DETECTION_THRESHOLD = 0.5` therefore sits in an empty gap. Crucially the signal **survives YouTube** — Opus 130k and 70k, AAC, and narration mixed under a music bed all still read 0.98 — so the docs' "unmodified audio" caveat does not bite here. Real videos do land in between: an ElevenLabs-narrated horror-story upload measured 0.82, i.e. −25.8.
+
+**Audio lifecycle.** Only the Whisper fallback leaves audio on disk, so `analyze_video` downloads a 60-second excerpt for captioned videos and **deletes it in a `finally`** once scoring is done; Whisper-path audio is left alone, since it predates this criterion and `metadata.media.audio` points at it. The criterion itself takes a path and does no I/O, and a failed audio download is caught in `analyze.py` so it costs one criterion rather than the whole video. Note the cost: every analyzed video now downloads its **full** audio track before cutting (a ranged download is throttled — see the yt-dlp section), which for a multi-hour video is a real transfer.
 
 ---
 
