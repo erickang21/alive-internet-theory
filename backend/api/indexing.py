@@ -12,14 +12,21 @@ _lock = threading.Lock()
 _jobs: dict[str, str] = {}
 
 
-def request(video_id: str) -> str:
+def request(video_id: str, force: bool = False) -> str:
+    """Queue the video unless it already has a job. `force` re-runs a finished or
+    failed one (the debug "rerun analysis" button); a running job is never doubled."""
     with _lock:
         status = _jobs.get(video_id)
-        if status is not None:
+        if status is not None and not (force and status != PENDING):
             return status
         _jobs[video_id] = PENDING
     threading.Thread(target=_run, args=(video_id,), daemon=True).start()
     return PENDING
+
+
+def is_pending(video_id: str) -> bool:
+    with _lock:
+        return _jobs.get(video_id) == PENDING
 
 
 def _run(video_id: str) -> None:

@@ -49,6 +49,7 @@ def analyze_video(video_id: str) -> dict[str, Any] | None:
             track_kind=transcript["kind"],
             channel_id=info.get("channel_id"),
             video_length_seconds=int(info.get("duration") or 0),
+            cues=transcript.get("cues"),
             audio_path=audio_path,
         )
     finally:

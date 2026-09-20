@@ -44,10 +44,16 @@ def score_upload_pattern(channel: dict[str, Any], video_length_seconds: int) -> 
         "deduction": deduction,
         "applied": True,
         "detail": (
-            f"Median gap between uploads: {median_gap:.1f}h over last {len(timestamps)} videos."
+            f"Median gap between uploads: {_format_gap(median_gap)} "
+            f"over last {len(timestamps)} videos."
         ),
         "evidence": {"median_gap_hours": round(median_gap, 1), "uploads_sampled": len(timestamps)},
     }
+
+
+def _format_gap(hours: float) -> str:
+    # Hours stop being readable past two days.
+    return f"{hours / 24:.1f} days" if hours > 48 else f"{hours:.1f}h"
 
 
 def score_account_age(channel: dict[str, Any]) -> dict[str, Any]:
