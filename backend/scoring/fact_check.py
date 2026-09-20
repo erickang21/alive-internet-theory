@@ -19,6 +19,7 @@ from typing import Any
 from backend.config import config
 from backend.factcheck.engine import FactCheckEngine
 from backend.factcheck.models import ClaimVerdict, ValidityReport
+from backend.factcheck.pregate import PreGateResult, pre_gate
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +89,32 @@ def _skipped_entry() -> dict[str, Any]:
     }
 
 
+def _pregate_skipped_entry(gate: PreGateResult) -> dict[str, Any]:
+    """The breakdown entry for a video the pre-gate ruled out before the engine ran.
+
+    Legacy-field mapping for this path (distinct from `_skipped_entry`, which
+    means "we don't know anything"): the pre-gate DID look at the video and
+    concluded it isn't the kind of thing fact-checking applies to, so
+    `is_educational=False` is actual information, not a placeholder. `thesis`
+    and `hallucinated` stay None because no claim was ever extracted or
+    verified -- there is nothing to report a thesis or a truth value for.
+    """
+    return {
+        "criterion": CRITERION,
+        "deduction": 0,
+        "applied": False,
+        "detail": f"Not fact-checked: {gate.reason}",
+        "evidence": {
+            "is_educational": False,
+            "thesis": None,
+            "hallucinated": None,
+            "validity_score": None,
+            "validity_rating": None,
+            "pregate": gate.to_dict(),
+        },
+    }
+
+
 def _top_claim_verdict(report: ValidityReport) -> ClaimVerdict | None:
     if not report.verdicts:
         return None
@@ -147,14 +174,33 @@ def _detail(report: ValidityReport) -> str:
     )
 
 
-def score_transcript(transcript: str) -> dict[str, Any]:
+def score_transcript(
+    transcript: str,
+    *,
+    title: str | None = None,
+    description: str | None = None,
+    categories: list[str] | None = None,
+) -> dict[str, Any]:
     """Fact-check every checkable claim in the transcript via FactCheckEngine.
 
     Recorded for the breakdown but never scored (deduction=0, applied=False):
     the Validity Score this surfaces is a separate, independent metric from
     the AI-slop score, per CLAUDE.md and the user's own choice to keep them
     apart.
+
+    `title`/`description`/`categories` come straight from the yt-dlp `info`
+    dict already in memory in backend/analyze.py -- no extra download. They
+    feed the pre-gate (backend/factcheck/pregate.py), which decides whether
+    this video is even worth fact-checking BEFORE the engine (claim
+    extraction, web search, per-claim verification -- minutes and real API
+    budget) is allowed to run. `pre_gate` never raises.
     """
+    gate = pre_gate(
+        title=title, description=description, transcript=transcript, categories=categories
+    )
+    if not gate.is_eligible:
+        return _pregate_skipped_entry(gate)
+
     if _credentials_unusable:
         return _skipped_entry()
     if not _credentials_configured():

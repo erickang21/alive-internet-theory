@@ -13,6 +13,14 @@ import pytest
 from backend.factcheck.models import Claim, ClaimVerdict, ValidityReport
 from backend.scoring import fact_check
 
+# Long enough to clear pregate.MIN_TRANSCRIPT_WORDS, and paired with an
+# explicit PROCEED category, so these adapter tests (which only fake
+# FactCheckEngine, not the pre-gate's LLM) reliably reach the engine. These
+# tests exercise the credentials gate and legacy-field derivation, not the
+# pre-gate itself -- that lives in TestPreGateWiring below.
+ELIGIBLE_TRANSCRIPT = " ".join(f"word{i}" for i in range(60))
+ELIGIBLE_KWARGS = {"categories": ["Education"]}
+
 
 @pytest.fixture(autouse=True)
 def _reset_credentials_flag():
@@ -96,7 +104,7 @@ def test_always_deduction_zero_and_not_applied_on_success(monkeypatch):
     _openai_credentials_present(monkeypatch)
     _install_fake_engine(monkeypatch, _report([_verdict(claim, status="false", truth_score=0.0)]))
 
-    result = fact_check.score_transcript("t")
+    result = fact_check.score_transcript(ELIGIBLE_TRANSCRIPT, **ELIGIBLE_KWARGS)
 
     assert result["deduction"] == 0
     assert result["applied"] is False
@@ -106,7 +114,7 @@ def test_always_deduction_zero_and_not_applied_when_skipped(monkeypatch):
     _no_credentials(monkeypatch)
     _install_poison_engine(monkeypatch)
 
-    result = fact_check.score_transcript("t")
+    result = fact_check.score_transcript(ELIGIBLE_TRANSCRIPT, **ELIGIBLE_KWARGS)
 
     assert result["deduction"] == 0
     assert result["applied"] is False
@@ -120,8 +128,8 @@ def test_no_credentials_returns_skipped_entry_with_none_fields_and_warns_once(mo
     _install_poison_engine(monkeypatch)
 
     with caplog.at_level("WARNING"):
-        first = fact_check.score_transcript("t")
-        second = fact_check.score_transcript("t")
+        first = fact_check.score_transcript(ELIGIBLE_TRANSCRIPT, **ELIGIBLE_KWARGS)
+        second = fact_check.score_transcript(ELIGIBLE_TRANSCRIPT, **ELIGIBLE_KWARGS)
 
     for result in (first, second):
         assert result["criterion"] == "fact_check"
@@ -147,7 +155,7 @@ def test_gateway_provider_without_url_is_treated_as_unconfigured(monkeypatch):
     )
     _install_poison_engine(monkeypatch)
 
-    result = fact_check.score_transcript("t")
+    result = fact_check.score_transcript(ELIGIBLE_TRANSCRIPT, **ELIGIBLE_KWARGS)
 
     assert result["evidence"]["is_educational"] is None
     assert fact_check._credentials_unusable is True
@@ -156,14 +164,14 @@ def test_gateway_provider_without_url_is_treated_as_unconfigured(monkeypatch):
 def test_unusable_flag_short_circuits_subsequent_calls_without_rechecking_config(monkeypatch):
     _no_credentials(monkeypatch)
     _install_poison_engine(monkeypatch)
-    fact_check.score_transcript("t")
+    fact_check.score_transcript(ELIGIBLE_TRANSCRIPT, **ELIGIBLE_KWARGS)
     assert fact_check._credentials_unusable is True
 
     # Even if credentials "become" configured mid-run, the flag alone decides
     # -- matching the old Anthropic-specific code's "skip for the rest of the
     # run" behavior.
     _openai_credentials_present(monkeypatch)
-    result = fact_check.score_transcript("t")
+    result = fact_check.score_transcript(ELIGIBLE_TRANSCRIPT, **ELIGIBLE_KWARGS)
 
     assert result["evidence"]["is_educational"] is None
 
@@ -175,7 +183,7 @@ def test_zero_claims_yields_not_educational_and_hallucinated_false_not_none(monk
     _openai_credentials_present(monkeypatch)
     _install_fake_engine(monkeypatch, _report([]))
 
-    result = fact_check.score_transcript("t")
+    result = fact_check.score_transcript(ELIGIBLE_TRANSCRIPT, **ELIGIBLE_KWARGS)
     evidence = result["evidence"]
 
     assert evidence["is_educational"] is False
@@ -191,7 +199,7 @@ def test_thesis_is_text_of_highest_weight_claim(monkeypatch):
     verdicts = [_verdict(low, status="verified_true"), _verdict(high, status="verified_true")]
     _install_fake_engine(monkeypatch, _report(verdicts))
 
-    result = fact_check.score_transcript("t")
+    result = fact_check.score_transcript(ELIGIBLE_TRANSCRIPT, **ELIGIBLE_KWARGS)
 
     assert result["evidence"]["is_educational"] is True
     assert result["evidence"]["thesis"] == "The core thesis of the video."
@@ -203,7 +211,7 @@ def test_hallucinated_true_when_top_claim_is_false(monkeypatch):
     verdicts = [_verdict(top, status="false", truth_score=0.0)]
     _install_fake_engine(monkeypatch, _report(verdicts))
 
-    result = fact_check.score_transcript("t")
+    result = fact_check.score_transcript(ELIGIBLE_TRANSCRIPT, **ELIGIBLE_KWARGS)
 
     assert result["evidence"]["hallucinated"] is True
 
@@ -214,7 +222,7 @@ def test_hallucinated_true_when_top_claim_is_misleading(monkeypatch):
     verdicts = [_verdict(top, status="misleading", truth_score=0.25)]
     _install_fake_engine(monkeypatch, _report(verdicts))
 
-    result = fact_check.score_transcript("t")
+    result = fact_check.score_transcript(ELIGIBLE_TRANSCRIPT, **ELIGIBLE_KWARGS)
 
     assert result["evidence"]["hallucinated"] is True
 
@@ -225,7 +233,7 @@ def test_hallucinated_false_when_top_claim_verified_true(monkeypatch):
     verdicts = [_verdict(top, status="verified_true", truth_score=1.0)]
     _install_fake_engine(monkeypatch, _report(verdicts))
 
-    result = fact_check.score_transcript("t")
+    result = fact_check.score_transcript(ELIGIBLE_TRANSCRIPT, **ELIGIBLE_KWARGS)
 
     assert result["evidence"]["hallucinated"] is False
 
@@ -236,7 +244,7 @@ def test_hallucinated_false_when_top_claim_unverifiable(monkeypatch):
     verdicts = [_verdict(top, status="unverifiable", truth_score=None)]
     _install_fake_engine(monkeypatch, _report(verdicts))
 
-    result = fact_check.score_transcript("t")
+    result = fact_check.score_transcript(ELIGIBLE_TRANSCRIPT, **ELIGIBLE_KWARGS)
 
     assert result["evidence"]["hallucinated"] is False
 
@@ -250,7 +258,7 @@ def test_evidence_includes_validity_score_rating_and_full_report(monkeypatch):
     report = _report([_verdict(claim, status="verified_true")])
     _install_fake_engine(monkeypatch, report)
 
-    result = fact_check.score_transcript("t")
+    result = fact_check.score_transcript(ELIGIBLE_TRANSCRIPT, **ELIGIBLE_KWARGS)
     evidence = result["evidence"]
 
     assert evidence["validity_score"] == report.validity_score
@@ -264,7 +272,7 @@ def test_detail_mentions_rating_and_claim_counts(monkeypatch):
     report = _report([_verdict(claim, status="verified_true")])
     _install_fake_engine(monkeypatch, report)
 
-    result = fact_check.score_transcript("t")
+    result = fact_check.score_transcript(ELIGIBLE_TRANSCRIPT, **ELIGIBLE_KWARGS)
 
     assert report.rating in result["detail"]
     assert str(report.claim_count) in result["detail"]
@@ -322,3 +330,115 @@ def test_unverifiable_thesis_is_not_reported_as_hallucinated():
 def test_false_thesis_is_reported_as_hallucinated():
     report = _report([_verdict(_claim(weight=3), status="false", truth_score=0.0)])
     assert fact_check._legacy_fields(report)["hallucinated"] is True
+
+
+# --- STEP 3 wiring: the pre-gate must actually gate the engine -------------------
+#
+# fact_check.score_transcript() now runs backend/factcheck/pregate.pre_gate()
+# before ever touching FactCheckEngine. These tests prove the gate, not the
+# gate's own classification logic (that's backend/tests/test_pregate.py's job):
+# credentials are configured throughout, so any engine call below can only be
+# explained by the pre-gate having let the video through.
+
+
+@pytest.fixture
+def _llm_spy(monkeypatch):
+    """Stands in for backend.factcheck.llm.complete (the pre-gate's Tier 2 call)."""
+    from backend.factcheck import llm
+
+    calls: list[dict] = []
+
+    def _fake(**kwargs):
+        calls.append(kwargs)
+        return None  # "LLM unavailable" -- pre_gate must fail closed on this.
+
+    monkeypatch.setattr(llm, "complete", _fake)
+    return calls
+
+
+def test_ineligible_category_skips_engine_entirely_and_records_the_reason(monkeypatch):
+    _openai_credentials_present(monkeypatch)
+    _install_poison_engine(monkeypatch)
+
+    result = fact_check.score_transcript(ELIGIBLE_TRANSCRIPT, categories=["Gaming"])
+
+    assert result["deduction"] == 0
+    assert result["applied"] is False
+    assert result["evidence"]["pregate"]["isEligible"] is False
+    assert "Gaming" in result["detail"]
+
+
+def test_ineligible_category_leaves_legacy_fields_as_documented(monkeypatch):
+    _openai_credentials_present(monkeypatch)
+    _install_poison_engine(monkeypatch)
+
+    evidence = fact_check.score_transcript(ELIGIBLE_TRANSCRIPT, categories=["Gaming"])["evidence"]
+
+    # See _pregate_skipped_entry's docstring for the mapping this locks in.
+    assert evidence["is_educational"] is False
+    assert evidence["thesis"] is None
+    assert evidence["hallucinated"] is None
+    assert evidence["validity_score"] is None
+    assert evidence["validity_rating"] is None
+
+
+def test_eligible_category_runs_engine_unchanged(monkeypatch):
+    _openai_credentials_present(monkeypatch)
+    claim = _claim(weight=3)
+    report = _report([_verdict(claim, status="verified_true")])
+    _install_fake_engine(monkeypatch, report)
+
+    result = fact_check.score_transcript(ELIGIBLE_TRANSCRIPT, categories=["Education"])
+
+    assert result["deduction"] == 0
+    assert result["applied"] is False
+    assert result["evidence"]["validity_score"] == report.validity_score
+    assert result["evidence"]["report"] == report.to_dict()
+    # The eligible path never ran the pre-gate skip branch.
+    assert "pregate" not in result["evidence"]
+
+
+def test_ambiguous_category_with_llm_unavailable_fails_closed(monkeypatch, _llm_spy):
+    _openai_credentials_present(monkeypatch)
+    _install_poison_engine(monkeypatch)
+
+    # "Entertainment" is neither a BYPASS nor a PROCEED category, so this can
+    # only be decided by Tier 2 -- and the LLM is unavailable (see _llm_spy).
+    result = fact_check.score_transcript(
+        ELIGIBLE_TRANSCRIPT, title="Some video", description="desc", categories=["Entertainment"]
+    )
+
+    assert _llm_spy, "expected the pre-gate to attempt a Tier 2 classification"
+    assert result["deduction"] == 0
+    assert result["applied"] is False
+    assert result["evidence"]["pregate"]["isEligible"] is False
+    assert result["evidence"]["pregate"]["category"] == "unknown"
+
+
+def test_pregate_dict_reaches_evidence_with_camelcase_keys(monkeypatch):
+    _openai_credentials_present(monkeypatch)
+    _install_poison_engine(monkeypatch)
+
+    pregate_evidence = fact_check.score_transcript(ELIGIBLE_TRANSCRIPT, categories=["Comedy"])[
+        "evidence"
+    ]["pregate"]
+
+    assert set(pregate_evidence.keys()) == {"isEligible", "category", "reason", "source"}
+    assert pregate_evidence["isEligible"] is False
+    assert pregate_evidence["source"] == "category"
+
+
+def test_missing_title_description_categories_does_not_raise(monkeypatch):
+    """Simulates an `info` dict missing these keys entirely (analyze.py does `.get(...)`)."""
+    _openai_credentials_present(monkeypatch)
+    _install_poison_engine(monkeypatch)
+
+    from backend.factcheck import llm
+
+    monkeypatch.setattr(llm, "complete", lambda **kwargs: {"category": "gaming", "reason": "r"})
+
+    result = fact_check.score_transcript(ELIGIBLE_TRANSCRIPT)  # no title/description/categories
+
+    assert result["deduction"] == 0
+    assert result["applied"] is False
+    assert result["evidence"]["pregate"]["category"] == "gaming"

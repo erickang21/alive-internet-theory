@@ -50,6 +50,9 @@ def analyze_video(video_id: str) -> dict[str, Any] | None:
             channel_id=info.get("channel_id"),
             video_length_seconds=int(info.get("duration") or 0),
             audio_path=audio_path,
+            title=info.get("title"),
+            description=info.get("description"),
+            categories=info.get("categories"),
         )
     finally:
         if temporary_audio and audio_path:

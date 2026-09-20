@@ -70,13 +70,28 @@ def evaluate_video(
     channel_id: str | None,
     video_length_seconds: int,
     audio_path: Path | None,
+    *,
+    title: str | None = None,
+    description: str | None = None,
+    categories: list[str] | None = None,
 ) -> dict[str, Any]:
     breakdown = [
         _run("gptzero_transcript", gptzero.score_transcript, transcript),
         _run("elevenlabs_voice", elevenlabs.score_audio, audio_path),
         _run("filler_words", fillers.score_transcript, transcript, track_kind),
     ]
-    fact_check_result = _run("fact_check", fact_check.score_transcript, transcript)
+    # title/description/categories are yt-dlp fields already in memory (see
+    # backend/analyze.py) -- passed through so fact_check.py's pre-gate can
+    # decide whether this video is worth fact-checking at all before the
+    # engine runs, at no extra cost (no additional yt-dlp call or download).
+    fact_check_result = _run(
+        "fact_check",
+        fact_check.score_transcript,
+        transcript,
+        title=title,
+        description=description,
+        categories=categories,
+    )
     breakdown.append(fact_check_result)
 
     if channel_id:
