@@ -26,7 +26,7 @@
     {
       "matches": ["https://www.youtube.com/*"],
       "js": ["dist/content.js"],
-      "css": ["dist/filter.css"],
+      "css": ["dist/overlay.css", "dist/filter.css", "dist/factCheckCard.css"],
       "run_at": "document_idle"
     }
   ]
