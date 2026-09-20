@@ -217,12 +217,43 @@ def score_transcript(
     extraction, web search, per-claim verification -- minutes and real API
     budget) is allowed to run. `pre_gate` never raises.
     """
-    gate = pre_gate(
-        title=title, description=description, transcript=transcript, categories=categories
+    gate = gate_video(
+        transcript, title=title, description=description, categories=categories
     )
     if not gate.is_eligible:
-        return _pregate_skipped_entry(gate)
+        return entry_for_gate(gate)
+    return run_engine(transcript)
 
+
+def gate_video(
+    transcript: str,
+    *,
+    title: str | None = None,
+    description: str | None = None,
+    categories: list[str] | None = None,
+) -> PreGateResult:
+    """The cheap half: is this video worth the engine at all? Never raises.
+
+    Split out so a caller running the check off the critical path
+    (backend/factchecks.py) can report the two phases separately -- deciding
+    eligibility is seconds, the engine is minutes, and the extension's tab
+    says something different for each.
+    """
+    return pre_gate(
+        title=title, description=description, transcript=transcript, categories=categories
+    )
+
+
+def entry_for_gate(gate: PreGateResult) -> dict[str, Any]:
+    """The breakdown entry for a video the pre-gate ruled out."""
+    return _pregate_skipped_entry(gate)
+
+
+def run_engine(transcript: str) -> dict[str, Any]:
+    """The expensive half: extract, gather sources, verify every claim.
+
+    Assumes the pre-gate already passed. Minutes and real API budget.
+    """
     if _credentials_unusable:
         return _skipped_entry()
     if not _credentials_configured():

@@ -48,7 +48,9 @@ def _analyze(video_id: str) -> None:
 
     logger.info("%s: analyzing", video_id)
     try:
-        evaluation = analyze_video(video_id)
+        # The fact check runs on its own thread afterwards (backend/factchecks.py),
+        # so it neither holds this analysis slot nor delays the verdict.
+        evaluation = analyze_video(video_id, fact_check_in_background=True)
     except Exception:
         logger.exception("%s: analysis failed", video_id)
         _set(video_id, "Analysis failed. See the backend logs.")

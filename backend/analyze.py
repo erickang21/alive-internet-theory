@@ -17,13 +17,21 @@ from typing import Any
 from backend import transcripts, ytdlp
 from backend.config import config
 from backend.database import EvaluationRepository, run_migrations
+from backend import factchecks
 from backend.scoring import elevenlabs, evaluate_video
 
 logger = logging.getLogger("backend.analyze")
 
 
-def analyze_video(video_id: str) -> dict[str, Any] | None:
-    """Returns None, storing nothing, when the video has no speech to analyze."""
+def analyze_video(video_id: str, *, fact_check_in_background: bool = False) -> dict[str, Any] | None:
+    """Returns None, storing nothing, when the video has no speech to analyze.
+
+    The evaluation is stored before the fact check runs, so the verdict does
+    not wait on it (see backend/factchecks.py). The API passes
+    `fact_check_in_background=True` and answers as soon as the row lands; the
+    CLI leaves it False and runs the check inline, because a script that exits
+    after its last video would take a background thread down with it.
+    """
     download = ytdlp.fetch_video(video_id)
     transcript = transcripts.get_transcript(download)
     if not transcript["text"]:
@@ -51,9 +59,6 @@ def analyze_video(video_id: str) -> dict[str, Any] | None:
             video_length_seconds=int(info.get("duration") or 0),
             cues=transcript.get("cues"),
             audio_path=audio_path,
-            title=info.get("title"),
-            description=info.get("description"),
-            categories=info.get("categories"),
         )
     finally:
         if temporary_audio and audio_path:
@@ -78,7 +83,18 @@ def analyze_video(video_id: str) -> dict[str, Any] | None:
             "subtitles": [_media_path(track.path) for track in download.subtitles],
         },
     }
-    return EvaluationRepository().upsert(evaluation)
+    stored = EvaluationRepository().upsert(evaluation)
+    # Stored first, checked second: everything above is independent of the fact
+    # check, and the card can already show a verdict while this runs.
+    factchecks.dispatch(
+        video_id,
+        transcript=transcript["text"],
+        title=info.get("title"),
+        description=info.get("description"),
+        categories=info.get("categories"),
+        background=fact_check_in_background,
+    )
+    return stored
 
 
 def _media_path(path: Path | None) -> str | None:

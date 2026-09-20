@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, ParamSpec
 
 from backend import ytdlp
-from backend.scoring import channel_history, elevenlabs, fact_check, fillers, gptzero, youtube
+from backend.scoring import channel_history, elevenlabs, fillers, gptzero, youtube
 from backend.transcripts import Cue
 
 logger = logging.getLogger(__name__)
@@ -74,30 +74,18 @@ def evaluate_video(
     video_length_seconds: int,
     audio_path: Path | None,
     cues: list[Cue] | None = None,
-    *,
-    title: str | None = None,
-    description: str | None = None,
-    categories: list[str] | None = None,
 ) -> dict[str, Any]:
     breakdown = [
         _run("gptzero_transcript", gptzero.score_transcript, transcript, cues),
         _run("elevenlabs_voice", elevenlabs.score_audio, audio_path),
         _run("filler_words", fillers.score_transcript, transcript, track_kind),
     ]
-    # title/description/categories are yt-dlp fields already in memory (see
-    # backend/analyze.py) -- passed through so fact_check.py's pre-gate can
-    # decide whether this video is worth fact-checking at all before the
-    # engine runs, at no extra cost (no additional yt-dlp call or download).
-    fact_check_result = _run(
-        "fact_check",
-        fact_check.score_transcript,
-        transcript,
-        title=title,
-        description=description,
-        categories=categories,
-    )
-    breakdown.append(fact_check_result)
-
+    # The fact check is NOT here. It is minutes of sequential LLM calls, it is
+    # never scored (deduction 0, applied False -- the Validity Score is its own
+    # metric), and running it inline meant the verdict card couldn't appear
+    # until it finished. backend/factchecks.py runs it after this evaluation is
+    # stored and patches its entry into the row; everything below is
+    # independent of it and never waits.
     if channel_id:
         channel = _safe("channel_fetch", ytdlp.fetch_channel, channel_id)
         if channel.get("channel_id"):
@@ -107,7 +95,6 @@ def evaluate_video(
             breakdown.append(_run("account_age", youtube.score_account_age, channel))
 
     score = _score(breakdown)
-    facts = fact_check_result.get("evidence", {})
 
     return {
         "video_id": video_id,
@@ -115,14 +102,16 @@ def evaluate_video(
         "score": score,
         "verdict": _verdict(score),
         "breakdown": breakdown,
-        # None when the fact check couldn't run (no API key, upstream error).
-        "is_educational": facts.get("is_educational"),
-        "thesis": facts.get("thesis"),
-        "hallucinated": facts.get("hallucinated"),
+        # Filled in later by backend/factchecks.py, which patches this row when
+        # the check finishes. They stay None if it never ran (no credentials,
+        # upstream error) or if the pre-gate ruled the video out.
+        "is_educational": None,
+        "thesis": None,
+        "hallucinated": None,
         # Validity Score from the fact-check engine: independent of `score`
         # above (fact_check is never applied to the AI-slop deduction math).
-        "validity_score": facts.get("validity_score"),
-        "validity_rating": facts.get("validity_rating"),
+        "validity_score": None,
+        "validity_rating": None,
     }
 
 

@@ -186,6 +186,22 @@ test("no stored report and no pregate skip maps to fact_checking", () => {
   assert.equal(patch.result, null);
 });
 
+test("stagePatchFromResponse carries checking_eligibility through as its own stage", () => {
+  // The backend reports the pre-gate phase separately from the engine phase, and
+  // the tab's copy differs: folding it into "fact_checking" would claim sources
+  // are being checked before anything decided the video was worth checking.
+  const patch = stagePatchFromResponse({ stage: "checking_eligibility" });
+  assert.equal(patch.stage, "checking_eligibility");
+  assert.equal(patch.result, null);
+  assert.equal(patch.pregate, null);
+});
+
+test("stagePatchFromResponse falls back to fact_checking for an unknown stage", () => {
+  // A newer backend phase must still read as "working", never as a terminal.
+  assert.equal(stagePatchFromResponse({ stage: "something_new" }).stage, "fact_checking");
+  assert.equal(stagePatchFromResponse(undefined).stage, "fact_checking");
+});
+
 test("an unavailable check maps to failed with the backend's own wording", () => {
   const patch = stagePatchFromResponse({
     stage: "failed",

@@ -64,7 +64,7 @@ const BreakdownLink = styled.button`
   }
 `;
 
-export function Card({ evaluation, celebrate, floating, factCheck = null }) {
+export function Card({ evaluation, celebrate, floating, onFactCheckRetry }) {
   const [panelOpen, setPanelOpen] = useState(false);
   const [thanked, setThanked] = useState(false);
   const vote = useVote(evaluation);
@@ -97,14 +97,18 @@ export function Card({ evaluation, celebrate, floating, factCheck = null }) {
           <BreakdownLink ref={link} type="button" onClick={() => setPanelOpen(true)}>
             View breakdown
           </BreakdownLink>
-          {factCheck}
         </Body>
         {thanked && <Thanks />}
         {celebrate && <Ring />}
       </Shell>
       {panelOpen &&
         createPortal(
-          <Panel evaluation={evaluation} vote={vote} onClose={closePanel} />,
+          <Panel
+            evaluation={evaluation}
+            vote={vote}
+            onClose={closePanel}
+            onFactCheckRetry={onFactCheckRetry}
+          />,
           document.body,
         )}
     </>

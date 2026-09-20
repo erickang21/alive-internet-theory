@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import styled, { keyframes } from "styled-components";
+import styled from "styled-components";
 
 import {
   getFactCheckState,
@@ -7,14 +7,18 @@ import {
   subscribeFactCheckState,
 } from "../shared/factCheckState.js";
 import { count } from "./format.js";
-import { Divider, bodyText, smallText } from "./primitives.jsx";
+import { Bone } from "./bones.jsx";
+import { bodyText, smallText } from "./primitives.jsx";
 
-// The fact-check section of the verdict card. The Validity Score is deliberately
-// independent of the AI-slop score (being wrong and being AI-generated are
-// different questions), so it renders as its own section rather than a breakdown
-// row. The card owns no polling: factCheckBridge.js writes records into
-// chrome.storage.local and this component re-renders from them, which is what
-// lets a result written minutes after the verdict appear without a reload.
+// The panel's Fact check tab, between Breakdown and Settings. The Validity Score
+// is deliberately independent of the AI-slop score (being wrong and being
+// AI-generated are different questions), so it gets its own tab rather than a
+// breakdown row -- and because the backend now runs the check AFTER storing the
+// evaluation (backend/factchecks.py), this tab is routinely still loading while
+// the verdict beside it is final. It owns no polling: factCheckBridge.js writes
+// records into chrome.storage.local and this component re-renders from them,
+// which is what lets a result written minutes after the verdict appear without
+// a reload.
 //
 // Everything shown here is model output or text scraped off a third-party page,
 // so nothing is interpolated into markup: it all renders through JSX text nodes,
@@ -103,15 +107,6 @@ const Section = styled.section`
   gap: var(--ait-space-2);
 `;
 
-const Title = styled.h4`
-  margin: 0;
-  ${smallText}
-  font-weight: 500;
-  color: var(--ait-text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-`;
-
 const Row = styled.div`
   display: flex;
   align-items: baseline;
@@ -140,23 +135,20 @@ const Note = styled.p`
   color: var(--ait-text-secondary);
 `;
 
-const spin = keyframes`
-  to { transform: rotate(360deg); }
+// What the finished report looks like, with every value still missing: a score
+// chip and rating, the "N of M verifiable" note, then a claim per row. Same
+// wave as the verdict card's skeleton (ui/bones.jsx), so a panel that is half
+// settled and half loading reads as one surface.
+const Scaffold = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: var(--ait-space-2);
 `;
 
-const Spinner = styled.span`
-  flex: 0 0 auto;
-  width: 12px;
-  height: 12px;
-  border: 2px solid var(--ait-tonal);
-  border-top-color: var(--ait-text-secondary);
-  border-radius: 50%;
-  align-self: center;
-  animation: ${spin} 0.8s linear infinite;
-
-  @media (prefers-reduced-motion: reduce) {
-    animation: none;
-  }
+const ScaffoldRow = styled.div`
+  display: flex;
+  align-items: center;
+  gap: var(--ait-space-2);
 `;
 
 const Toggle = styled.button`
@@ -361,16 +353,29 @@ function Complete({ result }) {
   );
 }
 
+/** The shape of the report that's coming, with a line saying what's happening. */
+function Loading({ note }) {
+  return (
+    <Scaffold aria-busy="true">
+      <ScaffoldRow>
+        <Bone $row={0} $width="52px" $height="24px" />
+        <Bone $row={0} $width="140px" $height="20px" />
+      </ScaffoldRow>
+      <Bone $row={1} $width="128px" $height="18px" />
+      <Bone $row={2} $width="100%" $height="16px" />
+      <Bone $row={3} $width="86%" $height="16px" />
+      <Bone $row={4} $width="92%" $height="16px" />
+      <Note>{note}</Note>
+    </Scaffold>
+  );
+}
+
 function Body({ record, onRetry }) {
   switch (record?.stage) {
     case "checking_eligibility":
+      return <Loading note="Checking whether this video makes claims worth verifying…" />;
     case "fact_checking":
-      return (
-        <Row>
-          <Spinner aria-hidden="true" />
-          <Note>Verifying this video&apos;s claims against independent sources…</Note>
-        </Row>
-      );
+      return <Loading note="Currently referencing citations…" />;
     case "complete":
       return <Complete result={record.result ?? {}} />;
     case "skipped_fiction":
@@ -397,17 +402,19 @@ function Body({ record, onRetry }) {
 
 export function FactCheck({ videoId, onRetry }) {
   const record = useFactCheckRecord(videoId);
-  // Idle means no record for this video yet: no section, no divider, rather
-  // than an empty ruled-off box at the bottom of the card.
-  if (!record?.stage || record.stage === "idle") return null;
+
+  // "idle" means no record for this video yet. In the card this rendered
+  // nothing; a tab can't be blank, and idle here is itself a wait -- the
+  // bridge writes its first record on its next tick.
+  const stage = record?.stage ?? "idle";
 
   return (
-    <>
-      <Divider />
-      <Section aria-live="polite">
-        <Title>Fact check</Title>
+    <Section aria-live="polite">
+      {stage === "idle" ? (
+        <Loading note="Waiting for the backend to start the fact check…" />
+      ) : (
         <Body record={record} onRetry={onRetry} />
-      </Section>
-    </>
+      )}
+    </Section>
   );
 }

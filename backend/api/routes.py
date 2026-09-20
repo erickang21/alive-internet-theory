@@ -2,6 +2,7 @@ from typing import Any, cast
 
 from flask import Blueprint, Response, jsonify, request
 
+from backend import factchecks
 from backend.api import indexing
 from backend.database import CommunityVoteRepository, EvaluationRepository
 from backend.factcheck.report import report_from_dict, to_markdown
@@ -105,6 +106,15 @@ def get_fact_check():
             return Response(to_markdown(report_from_dict(report_dict)), mimetype="text/markdown")
         return jsonify(report_dict)
 
+    # The check now runs after the evaluation is stored, so a row with no report
+    # is the normal state for the first minutes of a video's life rather than a
+    # dead end. While a job is in flight the phase is the answer, and it is
+    # checked before the two terminal shapes below so a rerun can't serve a
+    # stale "unavailable" while the new check is already running.
+    running = factchecks.phase(video_id)
+    if running is not None:
+        return jsonify({"status": "running", "phase": running})
+
     pregate = evidence.get("pregate")
     if (
         isinstance(pregate, dict)
@@ -113,8 +123,21 @@ def get_fact_check():
     ):
         return jsonify({"status": "skipped", "pregate": pregate})
 
-    detail = (entry or {}).get("detail") or "The fact check didn't run for this video."
-    return jsonify({"status": "unavailable", "detail": detail})
+    # `detail` is prose the criterion wrote for a human. `reason` is a machine
+    # key (engine._safe writes "upstream_error"; older rows carry
+    # "no_credentials") and must NOT be substituted for it -- this endpoint's
+    # answer goes straight into the extension's Fact check tab, and the contract
+    # is that the backend sends fields and the frontend owns every sentence.
+    # It rides along as its own field so the tab can say something better than
+    # the fallback once it holds the wording for these keys.
+    entry = entry or {}
+    return jsonify(
+        {
+            "status": "unavailable",
+            "detail": entry.get("detail") or "The fact check didn't run for this video.",
+            "reason": entry.get("reason"),
+        }
+    )
 
 
 def _fact_check_entry(evaluation: dict) -> dict | None:

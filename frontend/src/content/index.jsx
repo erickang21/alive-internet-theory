@@ -1,7 +1,6 @@
 import { MESSAGE_TYPES, RERUN_EVENT } from "../shared/constants.js";
 import { Card } from "../ui/Card.jsx";
 import { ErrorCard } from "../ui/ErrorCard.jsx";
-import { FactCheck } from "../ui/FactCheck.jsx";
 import { Skeleton } from "../ui/Skeleton.jsx";
 import { holdFeed, initAutoAnalyze, releaseFeed } from "./autoAnalyze.js";
 import { createFactCheckBridge } from "./factCheckBridge.js";
@@ -25,8 +24,9 @@ const SILENCE_MS = 2_000;
 
 // The fact-check gets its own poll loop (30s cadence: a check takes minutes) and
 // NEVER shares the score poll below, whose whole design is to stop the moment a
-// verdict settles - minutes before the fact-check has anything to say. The bridge
-// writes chrome.storage records; the card's FactCheck section renders from them.
+// verdict settles - the backend only STARTS the fact check once the evaluation is
+// stored (backend/factchecks.py), so it is always minutes behind. The bridge writes
+// chrome.storage records; the panel's Fact check tab renders from them.
 const factCheckBridge = createFactCheckBridge();
 
 let currentVideoId = null;
@@ -195,7 +195,7 @@ async function showEvaluation(videoId, token, first) {
       evaluation={result}
       celebrate={!first}
       floating={isFloating()}
-      factCheck={<FactCheck videoId={videoId} onRetry={() => factCheckBridge.retry(videoId)} />}
+      onFactCheckRetry={() => factCheckBridge.retry(videoId)}
     />,
   );
   releaseFeed();

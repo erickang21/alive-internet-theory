@@ -107,8 +107,15 @@ export function stagePatchFromResponse(response) {
       pregate: null,
     };
   }
-  // "fact_checking" - no evaluation row yet, so the analysis (and with it the
-  // fact check) is still on its way.
+  // "checking_eligibility" - the backend has a check in flight and its pre-gate
+  // hasn't decided yet. Carried through rather than folded into
+  // "fact_checking" below, because the tab says something different for each:
+  // nothing is being verified until the pre-gate passes.
+  if (response?.stage === "checking_eligibility") {
+    return { stage: "checking_eligibility", pregate: null, result: null };
+  }
+  // "fact_checking" - either the backend says so, or there is no evaluation row
+  // yet and the analysis (and with it the fact check) is still on its way.
   return { stage: "fact_checking", pregate: null, result: null };
 }
 

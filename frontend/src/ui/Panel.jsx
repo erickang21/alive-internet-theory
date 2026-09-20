@@ -3,17 +3,22 @@ import styled from "styled-components";
 
 import { RERUN_EVENT } from "../shared/constants.js";
 import { Breakdown } from "./Breakdown.jsx";
+import { FactCheck } from "./FactCheck.jsx";
 import { Feedback } from "./Feedback.jsx";
 import { Settings } from "./Settings.jsx";
 import { Thanks } from "./Thanks.jsx";
-import { BREAKDOWN, CLOSE, SETTINGS } from "./icons.js";
+import { BREAKDOWN, CLOSE, FACT_CHECK, SETTINGS } from "./icons.js";
 import { useDismiss } from "./hooks.js";
 import { Icon, IconButton, bodyText, focusRing } from "./primitives.jsx";
 
 const EXIT_MS = 200;
 const FOCUSABLE = 'a[href], button:not(:disabled):not([tabindex="-1"])';
+// Fact check sits between them on purpose: it reads as the second half of the
+// analysis, and it is the one tab that can still be loading while the rest of
+// the panel is final (backend/factchecks.py runs it after the evaluation).
 const TABS = [
   { id: "breakdown", label: "Breakdown", icon: BREAKDOWN },
+  { id: "fact-check", label: "Fact check", icon: FACT_CHECK },
   { id: "settings", label: "Settings", icon: SETTINGS },
 ];
 
@@ -88,7 +93,10 @@ const Tab = styled.button`
   justify-content: center;
   gap: var(--ait-space-2);
   height: var(--ait-control-height);
-  padding: 0 var(--ait-space-3);
+  /* Three tabs share 400px now, and "Fact check" wrapped to two lines at the old
+     12px. The icon gives up its space before the label does. */
+  padding: 0 var(--ait-space-2);
+  white-space: nowrap;
   border: none;
   background: ${(props) => (props.$selected ? "var(--ait-tonal-hover)" : "transparent")};
   color: var(--ait-${(props) => (props.$selected ? "text" : "text-secondary")});
@@ -150,7 +158,7 @@ const Rerun = styled.button`
   }
 `;
 
-export function Panel({ evaluation, vote, onClose }) {
+export function Panel({ evaluation, vote, onClose, onFactCheckRetry }) {
   const [tab, setTab] = useState("breakdown");
   const [thanked, setThanked] = useState(false);
   const [closing, setClosing] = useState(false);
@@ -213,11 +221,11 @@ export function Panel({ evaluation, vote, onClose }) {
           ))}
         </TabList>
         <Body role="tabpanel">
-          {tab === "breakdown" ? (
-            <Breakdown evaluation={evaluation} />
-          ) : (
-            <Settings debugExtra={<RerunButton />} />
+          {tab === "breakdown" && <Breakdown evaluation={evaluation} />}
+          {tab === "fact-check" && (
+            <FactCheck videoId={evaluation.video_id} onRetry={onFactCheckRetry} />
           )}
+          {tab === "settings" && <Settings debugExtra={<RerunButton />} />}
         </Body>
         <Footer>
           <Feedback vote={vote} onVoted={() => setThanked(true)} />

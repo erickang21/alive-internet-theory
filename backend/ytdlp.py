@@ -25,8 +25,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Recent uploads fully extracted for the cadence criterion (~1.3-2.4s each).
-RECENT_UPLOADS = 19
+# Recent uploads fully extracted for the cadence criterion (~1.2s each, measured), and
+# the dominant cost of analyzing a video from a channel not already cached: the loop
+# below is sequential, so this is a direct multiplier on how long that video takes.
+# Cadence is a median gap and needs 5 timestamps (backend/scoring/youtube.py), so 10
+# uploads (9 gaps) keeps the statistic sound while halving the wait.
+RECENT_UPLOADS = 10
 # Only the first 5 minutes of a video are analyzed.
 ANALYZED_SECONDS = 5 * 60
 AUDIO_FORMAT = "ba/b"

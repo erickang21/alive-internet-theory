@@ -89,14 +89,20 @@ async function submitVote({ videoId, voterId, vote }) {
 
 // GET /video/fact-check?video_id= discriminates the states itself: 404 means
 // no evaluation row at all (still indexing, so keep polling); a 200 carries
-// either the bare ValidityReport dict (no top-level "status" key, so the
-// shapes can't collide), {status: "skipped", pregate} for a video the
-// pre-gate genuinely classified as not fact-checkable, or
-// {status: "unavailable", detail} when the check couldn't run (no LLM
-// credentials, classifier down, a failed check). "unavailable" maps to the
-// bridge's terminal "failed" stage rather than "fact_checking": the state is
-// remembered in the row until a --force rerun, so polling it again cannot
-// change the answer.
+// the bare ValidityReport dict (no top-level "status" key, so the shapes can't
+// collide), or one of three statuses. {status: "running", phase} is a check
+// actually in flight in the backend, and the phase is already named as one of
+// our stages -- "checking_eligibility" while the pre-gate decides, then
+// "fact_checking" once it has -- so it passes straight through. The check runs
+// after the evaluation is stored (backend/factchecks.py), so this is the
+// normal answer for the first minutes of a video's life. {status: "skipped",
+// pregate} is a video the pre-gate genuinely classified as not
+// fact-checkable, and {status: "unavailable", detail} is a check that couldn't
+// run (no LLM credentials, classifier down, a failed check). "unavailable"
+// maps to the bridge's terminal "failed" stage rather than a loading one: the
+// state is remembered in the row until a --force rerun, so polling it again
+// cannot change the answer.
+const RUNNING_STAGES = new Set(["checking_eligibility", "fact_checking"]);
 async function getFactCheckStatus(videoId) {
   const url = `${API_BASE_URL}/video/fact-check?video_id=${encodeURIComponent(videoId)}`;
   const response = await fetch(url, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
@@ -104,6 +110,12 @@ async function getFactCheckStatus(videoId) {
   if (!response.ok) throw new Error(`Backend returned ${response.status}`);
 
   const body = await response.json();
+  if (body?.status === "running") {
+    // Trust the vocabulary, not the value: an unrecognized phase from a newer
+    // backend still means "working", and falling through to "complete" would
+    // hand the card a report that isn't there.
+    return { stage: RUNNING_STAGES.has(body.phase) ? body.phase : "fact_checking" };
+  }
   if (body?.status === "skipped") {
     return { stage: "skipped_fiction", pregate: body.pregate ?? null };
   }
