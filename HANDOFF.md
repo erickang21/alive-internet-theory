@@ -86,41 +86,42 @@ still exists. Worth knowing if you add tests here: same trap, same fix.
 
 ## Remaining work
 
-### 1. Backend: `/video/fact-check` can't express `skipped_fiction` — BLOCKING
+### 1. DONE — `/video/fact-check` now discriminates its states
 
-This is the one to fix first, and it's the least obvious thing on the branch.
-
-- Step 3's skip path writes the breakdown entry with `evidence.pregate` and
-  **no** `report` key (`backend/scoring/fact_check.py:92-113`).
-- `_fact_check_report()` only ever reads `evidence.report`
-  (`backend/api/routes.py:95-99`).
-
-So a correctly pre-gated Gaming video returns **404 "no fact-check report is
-stored"** — indistinguishable from "never analyzed" (also 404) and from
-"fact-check failed for missing credentials" (also 404). Three states, one 404.
-
-Treat that 404 as retryable and fiction videos poll forever. Treat it as
-terminal and every correct skip renders to the user as an error. The pre-gate
-works perfectly and then has nowhere to report its result.
-
-**Decision taken:** fix the endpoint, don't make the client guess. Keep 404 for
-"no evaluation row" only. When a row exists, return a discriminated 200:
+Implemented exactly per the table below, with one amendment found in review: a
+pre-gate whose `source` is `"fallback"` (the fail-closed gate — classifier down
+or no LLM credentials) never classified the video, so it serves as
+`unavailable`, not `skipped`, and `_pregate_skipped_entry` no longer stores
+`is_educational=False` for it. 404 is now only "no evaluation row". The worker
+maps the response directly and lost its fallback `GET /video/evaluation` round
+trip; the bridge treats `unavailable` as a terminal `failed` with the backend's
+own wording.
 
 | Condition | Response | Bridge stage |
 |---|---|---|
-| `evidence.pregate.isEligible === false` | `200 {"status":"skipped","pregate":{…}}` | `skipped_fiction` |
+| `evidence.pregate.isEligible === false` (genuinely classified) | `200 {"status":"skipped","pregate":{…}}` | `skipped_fiction` |
 | report present | `200` bare report dict — **unchanged** | `complete` |
-| neither | `200 {"status":"unavailable",…}` | `failed` |
+| neither, or a fallback-sourced pregate | `200 {"status":"unavailable","detail":…}` | `failed` |
 
-Leave the success payload byte-identical so `report_from_dict()` and any
-existing consumer keep working. Word the `unavailable` case honestly — the
-fact-check couldn't run; the *video* didn't fail.
+The success payload stayed byte-identical (`report_from_dict()` and existing
+consumers unaffected), pinned by a test.
 
-### 2. `backend/api/routes.py` has no tests at all
+### 2. DONE — `backend/tests/test_routes.py` exists
 
-Every other backend module has one. The routes have none, which is exactly why
-the gap above survived. Add `backend/tests/test_routes.py` covering all four
-cases in that table.
+Covers all rows of the table plus 404, the fallback-pregate amendment, the
+markdown path, and byte-identity of the report payload.
+
+### 2b. Also fixed in the same pass (from the end-to-end review)
+
+The full review write-up lives in the project's shared files
+(`factcheck-branch-review-2026-09-20.md`); the bugs it found are fixed on this
+branch: `openai` added to requirements.txt (lazy imports made a fresh install
+crash at first fact-check, not at startup); `python -m backend.factcheck`'s
+default mode reads the `transcript` key analyze.py now stores, and `_store`
+refuses to invent a bare evaluation row (which 500'd both /video/evaluation
+routes and blocked indexing forever) and writes the report into the breakdown
+entry the route reads; the feed filter's fresh-score pass merges over the
+cached pass instead of clobbering it when the worker is unreachable.
 
 ### 3. DONE — but don't undo it: the fact-check must not share the poll loop
 
