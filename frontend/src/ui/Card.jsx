@@ -10,51 +10,8 @@ import { Ring } from "./Ring.jsx";
 import { Thanks } from "./Thanks.jsx";
 import { Tokens } from "./tokens.js";
 import { useVote } from "./hooks.js";
+import { Body, Headline, Shell, Track } from "./frame.jsx";
 import { bodyText } from "./primitives.jsx";
-
-const SEGMENTS = 5;
-
-const Shell = styled.article`
-  position: relative;
-  margin-bottom: var(--ait-space-4);
-  border: 1px solid var(--ait-outline);
-  border-radius: var(--ait-radius);
-  background: var(--ait-surface);
-  color: var(--ait-text);
-  font-family: var(--ait-font);
-
-  ${(props) =>
-    props.$floating &&
-    `
-    position: fixed;
-    top: 72px;
-    right: var(--ait-space-4);
-    z-index: 2000;
-    width: 360px;
-    max-width: calc(100vw - 2 * var(--ait-space-4));
-    margin-bottom: 0;
-    box-shadow: var(--ait-elevation);
-  `}
-
-  /* Single-column layout: YouTube moves the anchors under the player, which has no gap below it. */
-  :not(#secondary-inner) > [data-ait-mount] > & {
-    margin-top: var(--ait-space-3);
-  }
-`;
-
-const Body = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: var(--ait-space-3);
-  padding: var(--ait-space-4);
-`;
-
-const Headline = styled.div`
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--ait-space-3);
-`;
 
 const Verdict = styled.h3`
   flex: 1 1 auto;
@@ -74,28 +31,6 @@ const Percent = styled.span`
   line-height: 2.2rem;
   font-weight: 700;
   font-stretch: 25%;
-`;
-
-const Track = styled.div`
-  position: relative;
-  height: 8px;
-  border-radius: 4px;
-  overflow: hidden;
-  background: var(--ait-tonal);
-
-  /* One gradient draws all four separators, so the segments need no extra elements. */
-  &::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(
-      90deg,
-      ${Array.from({ length: SEGMENTS - 1 }, (_, index) => {
-        const stop = ((index + 1) * 100) / SEGMENTS;
-        return `transparent calc(${stop}% - 2px), var(--ait-surface) calc(${stop}% - 2px) ${stop}%, transparent ${stop}%`;
-      }).join(", ")}
-    );
-  }
 `;
 
 const Fill = styled.div`

@@ -214,8 +214,8 @@ describe("threshold direction", () => {
 
   test("each score band gets its own preview label", () => {
     const expected = [
-      [10, "AI Slop", "ait-mark--ai"],
-      [44.9, "AI Slop", "ait-mark--ai"],
+      [10, "Heavy AI Use", "ait-mark--ai"],
+      [44.9, "Heavy AI Use", "ait-mark--ai"],
       [45, "Likely AI", "ait-mark--likely-ai"],
       [74.9, "Likely AI", "ait-mark--likely-ai"],
     ];
@@ -249,7 +249,7 @@ describe("threshold direction", () => {
       applyFilter("flag", [{ tile, videoId: "v", score: 60 }]);
       applyFilter("flag", [{ tile, videoId: "v", score: 20 }]);
       assert.equal(thumb.querySelectorAll(".ait-mark").length, 1);
-      assert.equal(thumb.querySelectorAll(".ait-mark__label")[0].textContent, "AI Slop");
+      assert.equal(thumb.querySelectorAll(".ait-mark__label")[0].textContent, "Heavy AI Use");
     });
   });
 });

@@ -37,7 +37,7 @@ const ICONS = {
 const BANDS = [
   { min: 75, label: "Likely Human", tone: null },
   { min: AI_FILTER_THRESHOLD, label: "Likely AI", tone: "likely-ai" },
-  { min: -Infinity, label: "AI Slop", tone: "ai" },
+  { min: -Infinity, label: "Heavy AI Use", tone: "ai" },
 ];
 
 function bandFor(score) {

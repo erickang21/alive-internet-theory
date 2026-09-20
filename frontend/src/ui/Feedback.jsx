@@ -1,6 +1,7 @@
 import styled from "styled-components";
 
 import { THUMBS } from "./icons.js";
+import { Footer } from "./frame.jsx";
 import { Icon, IconButton, Status, bodyText } from "./primitives.jsx";
 
 const PROMPT = "Was our analysis correct?";
@@ -35,12 +36,6 @@ const Thumb = styled(IconButton)`
   }
 `;
 
-const Shell = styled.div`
-  margin: 0 calc(-1 * var(--ait-space-4));
-  padding: var(--ait-space-2) var(--ait-space-4) 0;
-  border-top: 1px solid var(--ait-outline);
-`;
-
 /** Thumbs share one vote; `onVoted` fires only for a new choice made from this row. */
 export function Feedback({ vote, onVoted }) {
   const choose = async (name) => {
@@ -48,7 +43,7 @@ export function Feedback({ vote, onVoted }) {
   };
 
   return (
-    <Shell>
+    <Footer>
       <Row>
         <Prompt>{PROMPT}</Prompt>
         <Actions>
@@ -71,6 +66,6 @@ export function Feedback({ vote, onVoted }) {
         </Actions>
       </Row>
       {vote.failed && <Status role="status">{FAILURE}</Status>}
-    </Shell>
+    </Footer>
   );
 }

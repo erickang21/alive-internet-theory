@@ -1,6 +1,6 @@
 # Quick Start & Usage Guide
 
-Opening a video with the extension loaded queues it for analysis in the background. Nothing shows on that first visit, and the verdict appears the next time you open the video after the backend finishes. The analyze script is for batch runs and re-analysis. All commands run from the repo root.
+Opening a video with the extension loaded queues it for analysis in the background. The card goes up straight away as a shimmering placeholder and fills in with the verdict as soon as the backend finishes, without reopening the video. The analyze script is for batch runs and re-analysis. All commands run from the repo root.
 
 ## Quick start (Docker)
 
@@ -24,7 +24,7 @@ You need Docker, Node.js 20+, and Chrome.
    ```
    In Chrome, open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked**, and pick the `frontend/` folder.
 
-4. **Open a video in Chrome.** Nothing shows while the backend analyzes it in the background. Once it's done (usually under a minute, longer for a new channel or when Whisper is needed), the Alive Internet Theory card appears above the related videos (top right on Shorts) with a rainbow ring, without reopening the video. You can follow progress with `docker compose logs -f backend`.
+4. **Open a video in Chrome.** The Alive Internet Theory card appears above the related videos (top right on Shorts) as a shimmering placeholder while the backend analyzes it. Once it's done (usually under a minute, longer for a new channel or when Whisper is needed), the verdict fills the card in with a rainbow ring, without reopening the video. You can follow progress with `docker compose logs -f backend`.
 
 ## Analyzing videos in batches
 
@@ -85,14 +85,15 @@ Each stage prints a timestamped line: the queue size, `[2/7] <id>: starting`, me
 
 ### In the extension
 
-While a video is being analyzed, the extension's toolbar icon pulses amber, turning green once that video has a verdict, or red if the analysis failed (hover it for the reason); nothing appears on the page until the verdict is ready, and then the card arrives on its own. Clicking the toolbar icon opens the same settings on any page, which is how you turn the flags on or off from the home feed or search results.
+While a video is being analyzed, the extension's toolbar icon pulses amber, turning green once that video has a verdict, or red if the analysis failed (hover it for the reason); the card itself waits on the page as a placeholder and fills in on its own. Clicking the toolbar icon opens the same settings on any page, which is how you turn the flags on or off from the home feed or search results.
 
 
 On a watch page the card sits in the right column, above the fundraiser box and the related videos; on Shorts it floats in the top right. It shows one of:
 
-- **Likely human / Likely AI / AI Slop** with the score as a percentage and a meter. Scores start at 100: 75 and up is Likely human, 45 to under 75 is Likely AI, and below 45 is AI Slop. Under the meter, the card says how strongly the community agrees with the verdict and asks **Was our analysis correct?** A thumbs up agrees with the verdict and a thumbs down disagrees. **View breakdown** opens a popover with two tabs: **Breakdown** lists each criterion's points (red deduction, green bonus, or `n/a` when it didn't apply) and expands to its evidence; **Settings** has **AI flags on video previews** (darkens AI-leaning videos in feeds and the related list and tags them, leaving everything else alone) and **Remove AI-flagged videos** (hides the ones labelled AI Slop). **Debug mode** adds a **Rerun analysis** button (on the video's card, not in the toolbar popup) that re-analyzes the current video from scratch (the same as `--force`); the card disappears and comes back when the new verdict is ready. Close it with the X, Escape, or a click outside.
-- **Nothing at all:** there's no verdict yet, so the extension leaves the page alone. Opening the video queued it in the background (if it wasn't already), so reopen it later. If it never gets a verdict, the analysis failed: check `docker compose logs -f backend`. Failures are remembered until the backend restarts.
-- If the verdict lands while you're on the page (the extension re-checks about every 30 seconds), the card appears with a rainbow ring that draws around it once. A backend that isn't answering on `127.0.0.1:5000` also shows nothing (see Troubleshooting).
+- **Likely human / Likely AI / Heavy AI Use** with the score as a percentage and a meter. Scores start at 100: 75 and up is Likely human, 45 to under 75 is Likely AI, and below 45 is Heavy AI Use. Under the meter, the card says how strongly the community agrees with the verdict and asks **Was our analysis correct?** A thumbs up agrees with the verdict and a thumbs down disagrees. **View breakdown** opens a popover with two tabs: **Breakdown** lists each criterion's points (red deduction, green bonus, or `n/a` when it didn't apply) and expands to its evidence; **Settings** has **AI flags on video previews** (darkens AI-leaning videos in feeds and the related list and tags them, leaving everything else alone) and **Remove AI-flagged videos** (hides the ones labelled Heavy AI Use). **Debug mode** adds a **Rerun analysis** button (on the video's card, not in the toolbar popup) that re-analyzes the current video from scratch (the same as `--force`); the card drops back to the placeholder and fills in again when the new verdict is ready. Close it with the X, Escape, or a click outside.
+- **Evaluating video...** — the card's own shape with every value still missing, and a wave of light running down it. Opening the video queued it for analysis (if it wasn't already), and the card fills itself in when the verdict lands — the extension re-checks every few seconds, and a verdict that arrives while you're watching comes in with a rainbow ring that draws around the card once.
+- **Analysis failed:** the backend gave up on this video, and the card says so with the reason. **Analyze again** re-runs it from scratch. Failures are remembered until the backend restarts, so nothing retries on its own; `docker compose logs -f backend` has the detail.
+- **Analyzer unavailable:** nothing answered on `127.0.0.1:5000` within two seconds, so nothing is analyzing the video (see Troubleshooting). **Try again** re-asks, and the card returns to the placeholder by itself once the backend is back.
 
 ### From the API
 
@@ -140,8 +141,8 @@ You can run `ant auth login` instead of putting an Anthropic key in `.env`. A ve
 
 | You see | Cause and fix |
 |---|---|
-| No card on a video you know is analyzed | The stack is down. Run `docker compose ps`; if nothing is up, run `docker compose up -d`, then `curl http://127.0.0.1:5000/health`. |
-| No card appears after a while | Either it's still running (a new channel's upload dates, Whisper) or it failed. `docker compose logs -f backend` shows which, and why (yt-dlp break, age-restricted video). A failed video isn't retried until the backend restarts: fix the cause, run `docker compose restart backend`, and reopen the video. |
+| The card says **Analyzer unavailable** | The stack is down. Run `docker compose ps`; if nothing is up, run `docker compose up -d`, then `curl http://127.0.0.1:5000/health`. |
+| The card shimmers for a long time | Either it's still running (a new channel's upload dates, Whisper) or it failed. `docker compose logs -f backend` shows which, and why (yt-dlp break, age-restricted video). A failed video isn't retried until the backend restarts: fix the cause, run `docker compose restart backend`, and reopen the video. |
 | `zsh: no matches found: https://…` | Put the URL in quotes. |
 | `env file …/backend/.env not found` | Create it: `cp backend/.env.example backend/.env` and add your keys. |
 | `service "backend" is not running` | `exec` needs the stack up. Run `docker compose up -d`, or use `docker compose run --rm backend …` instead. |

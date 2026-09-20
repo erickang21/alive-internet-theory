@@ -55,9 +55,14 @@ const CRITERIA = {
         ? "Noticeably few filler words found."
         : "Narrates at a natural rate with occassional filler words.",
     rows: (evidence) => [
-      ["Fillers words found", count(evidence.filler_count, "words")],
-      ["Rate", number(evidence.rate_per_100_words, "fillers / 100 words")],
+      ["Filler words found", count(evidence.filler_count, "word")],
+      ["Rate", number(evidence.rate_per_100_words, " fillers / 100 words")],
     ],
+    about: (
+      <>
+        Natural speech often contains filler words like "um" and "like", with speakers on average using 3-5 fillers for every 100 words.
+      </>
+    ),
   },
   upload_pattern: {
     name: "Upload history",

@@ -3,7 +3,7 @@ export const API_BASE_URL = "http://127.0.0.1:5000";
 export const VERDICTS = {
   likely_human: { label: "Likely human", tone: "human", agreeVote: "human" },
   likely_ai: { label: "Likely AI", tone: "possibly", agreeVote: "ai" },
-  ai_slop: { label: "AI Slop", tone: "slop", agreeVote: "ai" },
+  ai_slop: { label: "Heavy AI Use", tone: "slop", agreeVote: "ai" },
 };
 
 export const MESSAGE_TYPES = {

@@ -21,6 +21,10 @@ export const Tokens = createGlobalStyle`
     --ait-text-disabled: var(--yt-sys-color-baseline--text-disabled, #909090);
     --ait-outline: var(--yt-sys-color-baseline--outline, rgba(0, 0, 0, 0.1));
     --ait-tonal: var(--yt-sys-color-baseline--additive-background, rgba(0, 0, 0, 0.05));
+    /* The skeleton keeps its own pair: the base has to read as a placeholder rather
+       than a surface, and the sheen has to stay the whiter one in both themes. */
+    --ait-skeleton: rgba(0, 0, 0, 0.08);
+    --ait-skeleton-sheen: rgba(255, 255, 255, 0.95);
     --ait-tonal-hover: var(--yt-sys-color-baseline--mono-tonal-hover, rgba(0, 0, 0, 0.1));
     --ait-tonal-pressed: var(--yt-sys-color-baseline--state-mono-standard-pressed, rgba(0, 0, 0, 0.1));
     --ait-cta: var(--yt-sys-color-baseline--call-to-action, #065fd4);
@@ -46,6 +50,8 @@ export const Tokens = createGlobalStyle`
     --ait-text-disabled: var(--yt-sys-color-baseline--text-disabled, #717171);
     --ait-outline: var(--yt-sys-color-baseline--outline, rgba(255, 255, 255, 0.2));
     --ait-tonal: var(--yt-sys-color-baseline--additive-background, rgba(255, 255, 255, 0.1));
+    --ait-skeleton: rgba(255, 255, 255, 0.11);
+    --ait-skeleton-sheen: rgba(255, 255, 255, 0.3);
     --ait-tonal-hover: var(--yt-sys-color-baseline--mono-tonal-hover, rgba(255, 255, 255, 0.2));
     --ait-tonal-pressed: var(--yt-sys-color-baseline--state-mono-standard-pressed, rgba(255, 255, 255, 0.1));
     --ait-cta: var(--yt-sys-color-baseline--call-to-action, #3ea6ff);
