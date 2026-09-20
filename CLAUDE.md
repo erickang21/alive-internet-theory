@@ -51,7 +51,7 @@ React 18 + styled-components, bundled by esbuild (`jsx: "automatic"`, minified, 
 | ElevenLabs voice scan (`elevenlabs_voice`) | up to −40 | ElevenLabs AI speech classifier over the audio (see below) |
 | Fact check → Validity Score | **not scored yet** (TBD); reported as its own independent score | Claim extraction + Browserbase search/fetch + per-claim verification (see Fact check section) |
 | Stutters / filler words (absence ⇒ AI) | up to −20 | Transcript text analysis, ASR tracks only (see Filler-word section) |
-| Upload frequency + video length | up to −10 | Exact upload timestamps of the channel's latest 20 uploads via yt-dlp (see yt-dlp section) |
+| Upload frequency + video length | up to −10 | Exact upload timestamps of the channel's latest 19 uploads via yt-dlp (see yt-dlp section) |
 | Account age | up to −5 | Exact timestamp of the channel's **oldest upload** via yt-dlp, a proxy because the creation date isn't available |
 | Channel history (`channel_history`) | **+10 to −10** | Average score of the channel's other stored evaluations (see below) |
 
@@ -241,7 +241,7 @@ GET /video/evaluation?video_id=…      # now also carries validity_score, valid
 **Channel data** (`fetch_channel`, cached per channel for 24h in the `channels` table):
 - The cached payload carries a `cache_version`. **Bump `CHANNEL_CACHE_VERSION`** (`backend/database/client.py`) whenever its shape changes: a mismatched row counts as a miss and is refetched, instead of being scored by newer code. Rows from before the version check held 50 uploads dated to midnight from the flat listing, which read as a 0.0h median gap between a channel's same-day uploads.
 - The uploads playlist (`UC…` → `UU…`) is listed with `extract_flat` **only for video IDs and order** (newest first). **Never use flat-entry dates.** Flat entries only have YouTube's relative dates ("3 days ago"), and even with `youtubetab:approximate_date` those came out up to 2 days wrong for recent uploads and months wrong for old ones.
-- Exact timestamps come from a **full extraction of each upload** (1.3–2.4s each, measured on different days): the latest 20 (`RECENT_UPLOADS`) for cadence (median gap), plus the oldest for account age, so 21 extractions. The listing walk itself takes 9–22s for a channel with 1,848 uploads, because finding the oldest upload means reading the whole list. Uploads that fail to extract (members-only, age-restricted, removed) are skipped with a warning.
+- Exact timestamps come from a **full extraction of each upload** (1.3–2.4s each, measured on different days): the latest 19 (`RECENT_UPLOADS`) for cadence (median gap), plus the oldest for account age, so 20 extractions. The listing walk itself takes 9–22s for a channel with 1,848 uploads, because finding the oldest upload means reading the whole list. Uploads that fail to extract (members-only, age-restricted, removed) are skipped with a warning.
 - **No channel creation date** is available from yt-dlp, including the About tab. Account age uses the oldest upload's exact timestamp. For MKBHD that's within about a week of the real creation date, but it undercounts channels that sat empty before their first public upload.
 - A bare channel URL expands to one nested playlist per tab (Videos, Live, Shorts); `resolve_video_ids` recurses into them.
 
